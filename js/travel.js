@@ -2,12 +2,8 @@ import { db, getCurrentUser, auth } from './auth.js';
 import { getRandomPlaces } from './samplePlaces.js';
 import {
   pickDate,
-  loadDecisions,
-  saveDecisions,
-  generateId,
   linkify
 } from './helpers.js';
-import { appendGoalToDOM } from './goals.js';
 
 const BASE_KEY = 'travelData';
 
@@ -562,16 +558,6 @@ export async function initTravelPanel() {
       });
       actionsTd.append(editBtn);
 
-      const goalBtn = document.createElement('button');
-      goalBtn.textContent = '🎯';
-      goalBtn.title = 'Add as goal';
-      Object.assign(goalBtn.style, { background: 'none', border: 'none', cursor: 'pointer' });
-      goalBtn.addEventListener('click', async e => {
-        e.stopPropagation();
-        await addPlaceAsGoal(p);
-      });
-      actionsTd.append(goalBtn);
-
       const delBtn = document.createElement('button');
       delBtn.textContent = '❌';
       delBtn.title = 'Delete';
@@ -780,27 +766,6 @@ export async function initTravelPanel() {
     renderTagFilters();
     renderList(currentSearch);
   }
-
-  async function addPlaceAsGoal(place) {
-    const all = await loadDecisions();
-    const newGoal = {
-      id: generateId(),
-      type: 'goal',
-      text: `Visit ${place.name}`,
-      notes: place.description || '',
-      completed: false,
-      resolution: '',
-      dateCompleted: '',
-      parentGoalId: null,
-      hiddenUntil: null,
-      deadline: '',
-      scheduled: place.Date || '',
-      scheduledEnd: ''
-    };
-    await saveDecisions([...all, newGoal]);
-    appendGoalToDOM(newGoal, [...all, newGoal]);
-  }
-
 
   if (searchInput) {
     searchInput.addEventListener('input', e => {
