@@ -2,9 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Dashboard</title>
+  <title>Places</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="style.css?v=20250829" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet" />
@@ -16,7 +16,7 @@
   <section id="goalsView">
     <nav class="navbar">
       <div class="container navbar-inner">
-        <div class="navbar-left site-name">Dashboard</div>
+        <div class="navbar-left site-name">Places</div>
         <div class="navbar-right">
           <button type="button" id="loginBtn" style="display:none;">Sign In</button>
           <button type="button" id="logoutBtn" style="display:none;">Sign Out</button>
@@ -29,22 +29,17 @@
 
     <div id="travelPanel" class="main-layout" style="display:none">
       <div class="full-column">
-        <div class="panel-header">
-          <h2>Places</h2>
-        </div>
         <div id="placeSearchRow">
-          <input id="placeSearch" type="text" placeholder="Search all places or coordinates...">
+          <input id="placeSearch" type="text" placeholder="Search all places or coordinates..." autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" name="place-search" enterkeyhint="search">
           <button type="button" id="placeSearchBtn">Search</button>
-          <button type="button" id="clearPlaceSearch">Clear</button>
         </div>
         <ul id="placeResults" class="search-results"></ul>
-        <h3 id="tripAdvisorHeader" style="margin-top:1em;">Popular Nearby Places</h3>
-        <ul id="tripAdvisorList" class="search-results"></ul>
+        
         <div id="travelMapWrapper">
           <div id="travelMap"></div>
           <div id="travelTagFilters"></div>
         </div>
-        <input id="travelSearch" type="text" placeholder="Filter list..." style="margin:8px 0;max-width:260px;">
+        <input id="travelSearch" type="text" placeholder="Filter my places..." style="margin:8px 0;max-width:260px;">
         <label id="showVisitedLabel">
           <input id="showVisitedToggle" type="checkbox">
           <span>Include visited</span>
@@ -130,8 +125,7 @@
 
   <script src="https://apis.google.com/js/api.js"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script type="module" src="js/main.js"></script>
-  <script type="module" src="js/travel.js"></script>
+  <script type="module" src="js/main.js?v=20250829"></script>
+  <script type="module" src="js/travel.js?v=20250829"></script>
 </body>
 </html>
-

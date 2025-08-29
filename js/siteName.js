@@ -1,5 +1,5 @@
 const KEY = 'siteName';
-const DEFAULT_NAME = 'Dashboard';
+const DEFAULT_NAME = 'Places';
 
 export function getSiteName() {
   try {
@@ -29,6 +29,6 @@ export function applySiteName() {
     el.textContent = name;
   });
   if (typeof document !== 'undefined' && document.title) {
-    document.title = document.title.replace(/Dashboard/g, name);
+    document.title = document.title.replace(/Dashboard|Places/g, name);
   }
 }

@@ -68,7 +68,7 @@ app.post('/contact', async (req, res) => {
       to: CONTACT_EMAIL,
       from: process.env.SMTP_USER,
       replyTo: from,
-      subject: `Dashboard contact from ${name || 'Anonymous'}`,
+      subject: `Places contact from ${name || 'Anonymous'}`,
       text: message
     });
     res.json({ status: 'ok' });

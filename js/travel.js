@@ -47,6 +47,8 @@ let allTags = [];
 let selectedTags = [];
 let resultMarkers = [];
 let sortByDistance = true;
+let sortKey = null; // one of: name, description, tags, Rating, Date, visited, distance
+let sortDir = 'asc'; // 'asc' | 'desc'
 let userCoords = null;
 let showVisited = true;
 const pageSize = Infinity;
@@ -134,10 +136,12 @@ export async function initTravelPanel() {
 
   const mapEl = document.getElementById('travelMap');
   const tableBody = document.querySelector('#travelTable tbody');
+  const tableHeaders = Array.from(document.querySelectorAll('#travelTable thead th'));
+  const headerKeys = ['name','description','tags','Rating','Date','visited','distance'];
+  const headerBaseText = tableHeaders.map(th => th.textContent.trim());
   const searchInput = document.getElementById('travelSearch');
   const placeInput = document.getElementById('placeSearch');
   const resultsList = document.getElementById('placeResults');
-  const clearResultsBtn = document.getElementById('clearPlaceSearch');
   const searchPlaceBtn = document.getElementById('placeSearchBtn');
   const tagFiltersDiv = document.getElementById('travelTagFilters');
   const placeCountEl = document.getElementById('placeCount');
@@ -286,6 +290,15 @@ export async function initTravelPanel() {
 
   renderTagFilters();
 
+  // Helper: bring a table row to the top and highlight it
+  function bringRowToTop(row) {
+    if (!row || !tableBody) return;
+    if (selectedRow) selectedRow.classList.remove('selected-row');
+    tableBody.insertBefore(row, tableBody.firstChild);
+    selectedRow = row;
+    row.classList.add('selected-row');
+  }
+
   function updatePagination(total) {
     if (!paginationDiv) return;
     const totalPages = Math.ceil(total / pageSize) || 1;
@@ -335,12 +348,39 @@ export async function initTravelPanel() {
       );
     }
 
-    if (sortByDistance && userCoords) {
-      items.sort(
-        (a, b) =>
-          haversine(userCoords[0], userCoords[1], a.lat, a.lon) -
-          haversine(userCoords[0], userCoords[1], b.lat, b.lon)
-      );
+    // Sorting
+    const compare = (a, b, key) => {
+      const dir = sortDir === 'desc' ? -1 : 1;
+      const val = v => {
+        switch (key) {
+          case 'name': return (v.name || '').toLowerCase();
+          case 'description': return (v.description || '').toLowerCase();
+          case 'tags': return Array.isArray(v.tags) ? v.tags.join(', ').toLowerCase() : '';
+          case 'Rating': {
+            const n = parseFloat(v.Rating);
+            return Number.isFinite(n) ? n : -Infinity;
+          }
+          case 'Date': {
+            const d = Date.parse(v.Date || '');
+            return Number.isFinite(d) ? d : -Infinity;
+          }
+          case 'visited': return v.visited ? 1 : 0;
+          case 'distance': {
+            if (!userCoords) return Infinity;
+            return haversine(userCoords[0], userCoords[1], v.lat, v.lon);
+          }
+          default: return 0;
+        }
+      };
+      const av = val(a), bv = val(b);
+      if (av < bv) return -1 * dir;
+      if (av > bv) return 1 * dir;
+      return 0;
+    };
+    if (sortKey) {
+      items.sort((a, b) => compare(a, b, sortKey));
+    } else if (sortByDistance && userCoords) {
+      items.sort((a, b) => compare(a, b, 'distance'));
     }
     const total = items.length;
     let start;
@@ -378,13 +418,11 @@ export async function initTravelPanel() {
       m.on('click', () => {
         const row = markerRowMap.get(m);
         if (row) {
-          if (selectedRow) selectedRow.classList.remove('selected-row');
-          selectedRow = row;
-          row.classList.add('selected-row');
+          bringRowToTop(row);
         }
       });
       if (term && items.length === 1 && index === 0) {
-        map.setView([p.lat, p.lon], 8);
+        map.setView([p.lat, p.lon], 14);
         m.openPopup();
       }
       const tr = document.createElement('tr');
@@ -588,10 +626,8 @@ export async function initTravelPanel() {
         // navigate without selecting the row or moving the map.
         if (e.target.closest('a')) return;
 
-        if (selectedRow) selectedRow.classList.remove('selected-row');
-        selectedRow = tr;
-        tr.classList.add('selected-row');
-        map.setView([p.lat, p.lon], 8);
+        bringRowToTop(tr);
+        map.setView([p.lat, p.lon], 14);
         m.openPopup();
         // mapEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
         // Don't auto-scroll to the map when selecting a place
@@ -599,75 +635,127 @@ export async function initTravelPanel() {
     });
   };
 
+  function updateSortIndicators() {
+    tableHeaders.forEach((th, i) => {
+      const base = headerBaseText[i];
+      const key = headerKeys[i];
+      if (sortKey === key) {
+        th.textContent = `${base} ${sortDir === 'asc' ? '▲' : '▼'}`;
+      } else {
+        th.textContent = base;
+      }
+    });
+  }
+
+  // Enable sorting by clicking headers
+  tableHeaders.forEach((th, i) => {
+    th.style.cursor = 'pointer';
+    th.title = 'Click to sort';
+    th.addEventListener('click', () => {
+      const key = headerKeys[i];
+      if (sortKey === key) {
+        sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        sortKey = key;
+        sortDir = 'asc';
+      }
+      // Disable default distance sort when custom sort is chosen
+      sortByDistance = false;
+      updateSortIndicators();
+      currentPage = 0;
+      renderList(currentSearch);
+    });
+  });
+  updateSortIndicators();
+
   const renderDefaultList = () => {
     currentPage = 0;
     renderList('');
   };
     
-    async function loadTripAdvisorPlaces() {
-      const listEl = document.getElementById('tripAdvisorList');
-      if (!listEl) return;
-      const [lat, lon] = userCoords || [0, 0];
-      const params = new URLSearchParams({
-        latitude: lat,
-        longitude: lon,
-        limit: '5',
-        currency: 'USD'
-      });
-      const apiKey = window.tripAdvisorApiKey || '';
-      try {
-        const res = await fetch(
-          `https://travel-advisor.p.rapidapi.com/attractions/list-by-latlng?${params.toString()}`,
-          apiKey
-            ? {
-                headers: {
-                  'X-RapidAPI-Key': apiKey,
-                  'X-RapidAPI-Host': 'travel-advisor.p.rapidapi.com'
-                }
-              }
-            : {}
-        );
-        const data = await res.json();
-        const places = data.data || data.results || [];
-        listEl.innerHTML = '';
-        places.forEach(pl => {
-          const name = pl.name || pl.title || pl.location_string || 'Unknown';
-          const lat = parseFloat(pl.latitude || pl.lat || pl.coordinates?.latitude || 0);
-          const lon = parseFloat(pl.longitude || pl.lon || pl.coordinates?.longitude || 0);
-          const li = document.createElement('li');
-          li.textContent = name;
-          const btn = document.createElement('button');
-          btn.textContent = 'Add';
-          btn.addEventListener('click', async () => {
-            await storePlace({
-              name,
-              description: pl.description || '',
-              lat,
-              lon,
-              tags: [],
-              Rating: '',
-              Date: '',
-              visited: false
-            });
-          });
-          li.appendChild(btn);
-          listEl.appendChild(li);
-        });
-      } catch (err) {
-        console.error('TripAdvisor fetch failed', err);
-        listEl.textContent = 'Failed to load places.';
-      }
-    }
+    // Removed: Popular Nearby Places section and TripAdvisor fetch
 
     const clearSearchResults = () => {
       if (resultsList) resultsList.innerHTML = '';
       resultMarkers.forEach(m => m.remove());
       resultMarkers = [];
     };
-    clearResultsBtn?.addEventListener('click', () => {
-      if (placeInput) placeInput.value = '';
-      clearSearchResults();
-    });
+    // Typeahead: suggest places while typing (no browser history suggestions)
+    let suggestAbort;
+    const debounce = (fn, wait = 300) => {
+      let t;
+      return (...args) => {
+        clearTimeout(t);
+        t = setTimeout(() => fn(...args), wait);
+      };
+    };
+    const suggestPlaces = async (q) => {
+      if (!resultsList) return;
+      if (!q || q.trim().length < 2) {
+        resultsList.innerHTML = '';
+        return;
+      }
+      // cancel previous in-flight request
+      if (suggestAbort) suggestAbort.abort();
+      suggestAbort = new AbortController();
+      const { signal } = suggestAbort;
+      try {
+        const url = `https://nominatim.openstreetmap.org/search?format=json&limit=5&q=${encodeURIComponent(q)}`;
+        const resp = await fetch(url, { signal });
+        if (!resp.ok) throw new Error('suggest fetch failed');
+        const data = await resp.json();
+        resultsList.innerHTML = '';
+        (data || []).forEach(res => {
+          const li = document.createElement('li');
+          li.textContent = res.display_name;
+          li.classList.add('search-result');
+          li.addEventListener('click', () => {
+            if (!placeInput) return;
+            placeInput.value = res.display_name;
+            // clear any prior markers and suggestions
+            clearSearchResults();
+            resultsList.innerHTML = '';
+            const latitude = parseFloat(res.lat);
+            const longitude = parseFloat(res.lon);
+            const m = L.marker([latitude, longitude], { icon: resultIcon }).addTo(map);
+            resultMarkers.push(m);
+            const popupDiv = document.createElement('div');
+            const title = document.createElement('div');
+            title.textContent = res.display_name;
+            const btn = document.createElement('button');
+            btn.textContent = 'Add to list';
+            popupDiv.append(title, btn);
+            m.bindPopup(popupDiv);
+            btn.addEventListener('click', async () => {
+              const name = prompt('Place name:', res.display_name.split(',')[0]);
+              if (!name) return;
+              await storePlace({ name, description: '', lat: latitude, lon: longitude, tags: [], Rating: '', Date: '', visited: false });
+              clearSearchResults();
+              placeInput.value = '';
+            });
+            map.setView([latitude, longitude], 14);
+            m.openPopup();
+          });
+          resultsList.appendChild(li);
+        });
+        if (resultsList.children.length === 0) {
+          const li = document.createElement('li');
+          li.textContent = 'No suggestions';
+          resultsList.appendChild(li);
+        }
+      } catch (err) {
+        if (err.name !== 'AbortError') {
+          // silent fail for suggestions
+          // console.error('suggest error', err);
+        }
+      }
+    };
+    placeInput?.setAttribute('autocomplete', 'off');
+    placeInput?.addEventListener('input', debounce(e => {
+      const val = e.target.value;
+      suggestPlaces(val);
+    }, 250));
+    // Clear button removed from UI; keep internal helper for programmatic clears only
 
     async function flushPendingOperations() {
     const user = getCurrentUser?.();
@@ -822,17 +910,14 @@ export async function initTravelPanel() {
       pos => {
         userCoords = [pos.coords.latitude, pos.coords.longitude];
         renderInitial();
-        loadTripAdvisorPlaces();
       },
       () => {
         // location retrieval failed; still render list without userCoords
         renderInitial();
-        loadTripAdvisorPlaces();
       }
     );
   } else {
     renderInitial();
-    loadTripAdvisorPlaces();
   }
 
   const dmsToDecimal = (deg, min, sec, dir) => {
@@ -876,8 +961,10 @@ export async function initTravelPanel() {
       li.textContent = p.name;
       li.classList.add('existing-place');
       li.addEventListener('click', () => {
-        map.setView([p.lat, p.lon], 8);
+        map.setView([p.lat, p.lon], 14);
         p.marker?.openPopup();
+        const row = p.marker ? markerRowMap.get(p.marker) : null;
+        if (row) bringRowToTop(row);
       });
       resultsList?.append(li);
     });
@@ -904,11 +991,11 @@ export async function initTravelPanel() {
       li.textContent = title.textContent;
       li.classList.add('search-result');
       li.addEventListener('click', () => {
-        map.setView([lat, lon], 8);
+        map.setView([lat, lon], 14);
         m.openPopup();
       });
       if (resultsList) resultsList.append(li);
-      map.setView([lat, lon], 8);
+      map.setView([lat, lon], 14);
       return;
     }
     try {
@@ -942,13 +1029,13 @@ export async function initTravelPanel() {
           li.textContent = display_name;
           li.classList.add('search-result');
           li.addEventListener('click', () => {
-            map.setView([latitude, longitude], 8);
+            map.setView([latitude, longitude], 14);
             m.openPopup();
           });
           if (resultsList) resultsList.append(li);
         });
         if (latLngs.length === 1) {
-          map.setView(latLngs[0], 8);
+          map.setView(latLngs[0], 14);
         } else {
           map.fitBounds(latLngs);
         }
