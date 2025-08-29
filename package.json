@@ -12,7 +12,6 @@
     "update:geo": "node scripts/addGeoMetadata.js",
     "monitor:temp": "node scripts/tempAlert.js",
     "generate:geoscore": "node scripts/generateGeoscoreQuestions.js",
-    "update:cities": "node scripts/populateCities.js",
     "prepare": "husky install",
     "start": "node backend/server.js"
   },
