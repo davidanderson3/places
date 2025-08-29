@@ -1,2 +1,6 @@
 node_modules/
 
+package-lock.json
+doc.kml
+serviceAccountKey.json
+assets/travel/extra.kml
