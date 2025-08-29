@@ -14,7 +14,7 @@ try {
 
 const execFileAsync = util.promisify(execFile);
 const app = express();
-const PORT = process.env.PORT || 3002;
+const PORT = process.env.PORT || 3003;
 
 // Enable CORS for all routes so the frontend can reach the API
 app.use(cors());
