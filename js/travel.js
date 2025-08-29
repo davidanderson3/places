@@ -268,6 +268,10 @@ export async function initTravelPanel() {
   const renderTagFilters = () => {
     if (!tagFiltersDiv) return;
     tagFiltersDiv.innerHTML = '';
+    const header = document.createElement('div');
+    header.className = 'tags-header';
+    header.textContent = 'Tags';
+    tagFiltersDiv.append(header);
     allTags.forEach(tag => {
       const btn = document.createElement('button');
       btn.type = 'button';
@@ -289,6 +293,26 @@ export async function initTravelPanel() {
   };
 
   renderTagFilters();
+
+  // Show scroll arrows on the tags panel when content overflows
+  const updateTagScrollIndicators = () => {
+    if (!tagFiltersDiv) return;
+    const el = tagFiltersDiv;
+    const scrollable = el.scrollHeight > el.clientHeight + 1;
+    el.classList.toggle('scrollable', scrollable);
+    if (!scrollable) {
+      el.classList.remove('at-top', 'at-bottom');
+      return;
+    }
+    const atTop = el.scrollTop <= 1;
+    const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 1;
+    el.classList.toggle('at-top', atTop);
+    el.classList.toggle('at-bottom', atBottom);
+  };
+  tagFiltersDiv?.addEventListener('scroll', updateTagScrollIndicators);
+  // Recompute after initial render and on window resize
+  setTimeout(updateTagScrollIndicators, 0);
+  window.addEventListener('resize', () => setTimeout(updateTagScrollIndicators, 0));
 
   // Helper: bring a table row to the top and highlight it
   function bringRowToTop(row) {
@@ -407,7 +431,21 @@ export async function initTravelPanel() {
         p.visited || /icon-503-62AF44/.test(p.styleUrl)
           ? visitedIcon
           : defaultIcon;
-      const m = L.marker([p.lat, p.lon], { icon }).addTo(map).bindPopup(p.name);
+      const m = L.marker([p.lat, p.lon], { icon }).addTo(map);
+      {
+        const popupDiv = document.createElement('div');
+        const title = document.createElement('div');
+        title.textContent = p.name;
+        const dir = document.createElement('a');
+        dir.href = `https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lon}`;
+        dir.target = '_blank';
+        dir.rel = 'noopener noreferrer';
+        dir.textContent = 'Directions';
+        dir.style.display = 'inline-block';
+        dir.style.marginTop = '4px';
+        popupDiv.append(title, dir);
+        m.bindPopup(popupDiv);
+      }
       markers.push(m);
       Object.defineProperty(p, 'marker', {
         value: m,
@@ -605,7 +643,13 @@ export async function initTravelPanel() {
         if (!confirm('Delete this place?')) return;
         await deletePlace(p);
       });
-      actionsTd.append(delBtn);
+      const dirLink = document.createElement('a');
+      dirLink.href = `https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lon}`;
+      dirLink.target = '_blank';
+      dirLink.rel = 'noopener noreferrer';
+      dirLink.textContent = 'Directions';
+      Object.assign(dirLink.style, { marginLeft: '6px' });
+      actionsTd.append(delBtn, dirLink);
 
       tr.append(
         nameTd,
@@ -719,13 +763,20 @@ export async function initTravelPanel() {
             const longitude = parseFloat(res.lon);
             const m = L.marker([latitude, longitude], { icon: resultIcon }).addTo(map);
             resultMarkers.push(m);
-            const popupDiv = document.createElement('div');
-            const title = document.createElement('div');
-            title.textContent = res.display_name;
-            const btn = document.createElement('button');
-            btn.textContent = 'Add to list';
-            popupDiv.append(title, btn);
-            m.bindPopup(popupDiv);
+          const popupDiv = document.createElement('div');
+          const title = document.createElement('div');
+          title.textContent = res.display_name;
+          const btn = document.createElement('button');
+          btn.textContent = 'Add to list';
+          const dir = document.createElement('a');
+          dir.href = `https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}`;
+          dir.target = '_blank';
+          dir.rel = 'noopener noreferrer';
+          dir.textContent = 'Directions';
+          dir.style.display = 'inline-block';
+          dir.style.marginTop = '4px';
+          popupDiv.append(title, btn, dir);
+          m.bindPopup(popupDiv);
             btn.addEventListener('click', async () => {
               const name = prompt('Place name:', res.display_name.split(',')[0]);
               if (!name) return;
@@ -978,7 +1029,14 @@ export async function initTravelPanel() {
       title.textContent = `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
       const btn = document.createElement('button');
       btn.textContent = 'Add to list';
-      popupDiv.append(title, btn);
+      const dir = document.createElement('a');
+      dir.href = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}`;
+      dir.target = '_blank';
+      dir.rel = 'noopener noreferrer';
+      dir.textContent = 'Directions';
+      dir.style.display = 'inline-block';
+      dir.style.marginTop = '4px';
+      popupDiv.append(title, btn, dir);
       m.bindPopup(popupDiv);
       btn.addEventListener('click', async () => {
         const name = prompt('Place name:', '');
@@ -1015,7 +1073,14 @@ export async function initTravelPanel() {
           title.textContent = display_name;
           const btn = document.createElement('button');
           btn.textContent = 'Add to list';
-          popupDiv.append(title, btn);
+          const dir = document.createElement('a');
+          dir.href = `https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}`;
+          dir.target = '_blank';
+          dir.rel = 'noopener noreferrer';
+          dir.textContent = 'Directions';
+          dir.style.display = 'inline-block';
+          dir.style.marginTop = '4px';
+          popupDiv.append(title, btn, dir);
           m.bindPopup(popupDiv);
           btn.addEventListener('click', async () => {
             const name = prompt('Place name:', display_name.split(',')[0]);

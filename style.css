@@ -1467,6 +1467,55 @@ h2 {
   height: 300px;
   overflow-y: auto;
   overflow-x: hidden;
+  position: relative;
+}
+
+#travelTagFilters .tags-header {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+/* Scroll hint arrows for tag list */
+#travelTagFilters.scrollable::after,
+#travelTagFilters.scrollable::before {
+  content: '';
+  position: sticky;
+  left: 0;
+  right: 0;
+  height: 18px;
+  display: block;
+  pointer-events: none;
+  z-index: 1;
+}
+
+#travelTagFilters.scrollable::after {
+  bottom: 0;
+  background: linear-gradient(to top, rgba(255,255,255,0.95), rgba(255,255,255,0));
+}
+
+#travelTagFilters.scrollable::before {
+  top: 0;
+  background: linear-gradient(to bottom, rgba(255,255,255,0.95), rgba(255,255,255,0));
+}
+
+/* Arrow icons overlay */
+#travelTagFilters.scrollable .tags-scroll-down,
+#travelTagFilters.scrollable .tags-scroll-up { display: none; }
+
+#travelTagFilters.scrollable:not(.at-bottom)::after {
+  content: '▼';
+  color: #666;
+  text-align: center;
+  font-size: 11px;
+  line-height: 18px;
+}
+
+#travelTagFilters.scrollable:not(.at-top)::before {
+  content: '▲';
+  color: #666;
+  text-align: center;
+  font-size: 11px;
+  line-height: 18px;
 }
 
 /* Keep tags beside the map on large screens */

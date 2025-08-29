@@ -8,18 +8,9 @@ import {
   persistentMultipleTabManager
 } from "https://www.gstatic.com/firebasejs/10.11.0/firebase-firestore.js";
 import { clearDecisionsCache, clearGoalOrderCache } from './cache.js';
+import firebaseConfig from './firebaseConfig.js';
 
 export let currentUser = null;
-
-const firebaseConfig = {
-  apiKey: "AIzaSyBbet_bmwm8h8G5CqvmzrdAnc3AO-0IKa8",
-  authDomain: "decision-maker-4e1d3.firebaseapp.com",
-  projectId: "decision-maker-4e1d3",
-  storageBucket: "decision-maker-4e1d3.firebasestorage.app",
-  messagingSenderId: "727689864651",
-  appId: "1:727689864651:web:0100c3894790b8c188c24e",
-  measurementId: "G-7EJVQN0WT3"
-};
 
 firebase.initializeApp(firebaseConfig);
 export const auth = firebase.auth();
@@ -123,4 +114,3 @@ export function initAuth({ loginBtn, logoutBtn, userEmail, bottomLoginBtn, botto
     onLogin(user);
   });
 }
-
