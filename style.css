@@ -29,7 +29,7 @@ body.mild-glow {
   justify-content: center;
   gap: 32px;
   /* Expand panels to use most of the viewport on wider screens */
-  max-width: 95vw;
+  max-width: 100vw;
   width: 100%;
   box-sizing: border-box;
   padding-left: 0;
@@ -66,8 +66,8 @@ body.mild-glow {
 .navbar-inner {
   width: 100%;
   /* Allow the navbar to stretch nearly full width */
-  max-width: 95vw;
-  margin: 0 auto;
+  max-width: 100vw;
+  margin: 0;
   box-sizing: border-box;
   padding: 5px 24px;
   display: flex;
@@ -1013,14 +1013,11 @@ button:hover {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  margin: 0 auto 30px;
-  /* give some breathing room vertically */
-  /* Use most of the screen width on desktops */
-  max-width: 95vw;
+  margin: 0;
+  max-width: 100vw;
   width: 100%;
   box-sizing: border-box;
-  padding: 0 20px;
-  /* horizontal gutter */
+  padding: 0;
 }
 
 /* if you want an inner wrapper like .container */
@@ -1029,11 +1026,9 @@ button:hover {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  /* Stretch inner container nearly full width */
-  max-width: 95vw;
-  margin: 0 auto;
-  padding: 0 20px;
-  /* gutter */
+  max-width: 100vw;
+  margin: 0;
+  padding: 0;
   display: flex;
   align-items: center;
 }
@@ -1467,7 +1462,7 @@ h2 {
   align-items: flex-start;
   gap: 8px;
   flex-wrap: wrap;
-  margin: 8px 0;
+  margin: 0;
 }
 
 #travelMap {
