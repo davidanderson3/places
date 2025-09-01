@@ -239,7 +239,11 @@ export async function initTravelPanel() {
   }).setView([20, 0], 2);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '© OpenStreetMap contributors',
-    noWrap: true
+    noWrap: false,
+    bounds: [
+      [-85.05112878, -180],
+      [85.05112878, 180]
+    ]
   }).addTo(map);
   map.on('moveend', updateVisiblePlacemarkList);
   resizeTravelMap();
