@@ -19,6 +19,22 @@ const PORT = process.env.PORT || 3003;
 // Enable CORS for all routes so the frontend can reach the API
 app.use(cors());
 
+app.use(express.json());
+
+// Expose Firebase config to the frontend at runtime.
+app.get('/firebase-config.js', (req, res) => {
+  const cfg = {
+    apiKey: process.env.FIREBASE_API_KEY,
+    authDomain: process.env.FIREBASE_AUTH_DOMAIN,
+    projectId: process.env.FIREBASE_PROJECT_ID,
+    storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
+    messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID,
+    appId: process.env.FIREBASE_APP_ID,
+    measurementId: process.env.FIREBASE_MEASUREMENT_ID
+  };
+  res.type('application/javascript').send(`window.firebaseConfig = ${JSON.stringify(cfg)};`);
+});
+
 const CONTACT_EMAIL = Buffer.from('ZHZkbmRyc25AZ21haWwuY29t', 'base64').toString('utf8');
 const mailer = (() => {
   if (!nodemailer || !process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS) return null;
@@ -32,8 +48,6 @@ const mailer = (() => {
     }
   });
 })();
-
-app.use(express.json());
 
 const plaidClient = (() => {
   const clientID = process.env.PLAID_CLIENT_ID;
