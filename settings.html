@@ -4,7 +4,10 @@
   <meta charset="UTF-8" />
     <title>Places</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <link rel="stylesheet" href="style.css?v=20250829" />
+  <link id="page-style" rel="stylesheet" />
+  <script>
+    document.getElementById('page-style').href = 'style.css?v=' + Date.now();
+  </script>
 </head>
 <body>
   <nav class="navbar">

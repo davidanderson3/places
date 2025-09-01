@@ -314,13 +314,18 @@ export async function initTravelPanel() {
   setTimeout(updateTagScrollIndicators, 0);
   window.addEventListener('resize', () => setTimeout(updateTagScrollIndicators, 0));
 
+  // Highlight a table row without reordering
+  function highlightRow(row) {
+    if (selectedRow) selectedRow.classList.remove('selected-row');
+    selectedRow = row;
+    row.classList.add('selected-row');
+  }
+
   // Helper: bring a table row to the top and highlight it
   function bringRowToTop(row) {
     if (!row || !tableBody) return;
-    if (selectedRow) selectedRow.classList.remove('selected-row');
     tableBody.insertBefore(row, tableBody.firstChild);
-    selectedRow = row;
-    row.classList.add('selected-row');
+    highlightRow(row);
   }
 
   function updatePagination(total) {
@@ -670,7 +675,7 @@ export async function initTravelPanel() {
         // navigate without selecting the row or moving the map.
         if (e.target.closest('a')) return;
 
-        bringRowToTop(tr);
+        highlightRow(tr);
         map.setView([p.lat, p.lon], 14);
         m.openPopup();
         // mapEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1015,7 +1020,7 @@ export async function initTravelPanel() {
         map.setView([p.lat, p.lon], 14);
         p.marker?.openPopup();
         const row = p.marker ? markerRowMap.get(p.marker) : null;
-        if (row) bringRowToTop(row);
+        if (row) highlightRow(row);
       });
       resultsList?.append(li);
     });
