@@ -2,33 +2,21 @@ const KEY = 'siteName';
 const DEFAULT_NAME = 'Places';
 
 export function getSiteName() {
-  try {
-    if (typeof localStorage !== 'undefined') {
-      return localStorage.getItem(KEY) || DEFAULT_NAME;
-    }
-  } catch {}
+  // Hard-code the site name regardless of stored settings
   return DEFAULT_NAME;
 }
 
 export function setSiteName(name) {
+  // Ignore attempts to customize; always use DEFAULT_NAME
   try {
     if (typeof localStorage !== 'undefined') {
-      const trimmed = name?.trim();
-      if (trimmed) {
-        localStorage.setItem(KEY, trimmed);
-      } else {
-        localStorage.removeItem(KEY);
-      }
+      localStorage.removeItem(KEY);
     }
   } catch {}
 }
 
 export function applySiteName() {
-  const name = getSiteName();
   document.querySelectorAll('.site-name').forEach(el => {
-    el.textContent = name;
+    el.textContent = DEFAULT_NAME;
   });
-  if (typeof document !== 'undefined' && document.title) {
-    document.title = document.title.replace(/Dashboard|Places/g, name);
-  }
 }
