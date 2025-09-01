@@ -130,6 +130,52 @@ function applyVisitedFlag(place) {
   }
 }
 
+function createPlacemarkPopup(place) {
+  const container = document.createElement('div');
+  if (place.name) {
+    const title = document.createElement('div');
+    title.textContent = place.name;
+    title.style.fontWeight = 'bold';
+    container.appendChild(title);
+  }
+  const table = document.createElement('table');
+  table.style.marginTop = '4px';
+  Object.entries(place).forEach(([key, value]) => {
+    if (key === 'name' || key === 'marker') return;
+    const row = document.createElement('tr');
+    const labelCell = document.createElement('td');
+    labelCell.style.fontWeight = 'bold';
+    labelCell.style.paddingRight = '4px';
+    labelCell.textContent = key;
+    const valueCell = document.createElement('td');
+    let display = value;
+    if (Array.isArray(display)) display = display.join(', ');
+    else if (typeof display === 'boolean') display = display ? 'Yes' : 'No';
+    if (typeof display === 'string') {
+      valueCell.innerHTML = linkify(display);
+    } else {
+      valueCell.textContent = display ?? '';
+    }
+    row.append(labelCell, valueCell);
+    table.appendChild(row);
+  });
+  const dirRow = document.createElement('tr');
+  const dirLabel = document.createElement('td');
+  dirLabel.style.fontWeight = 'bold';
+  dirLabel.textContent = 'Directions';
+  const dirCell = document.createElement('td');
+  const dirLink = document.createElement('a');
+  dirLink.href = `https://www.google.com/maps/dir/?api=1&destination=${place.lat},${place.lon}`;
+  dirLink.target = '_blank';
+  dirLink.rel = 'noopener noreferrer';
+  dirLink.textContent = 'Open in Maps';
+  dirCell.appendChild(dirLink);
+  dirRow.append(dirLabel, dirCell);
+  table.appendChild(dirRow);
+  container.appendChild(table);
+  return container;
+}
+
 function updateVisiblePlacemarkList() {
   if (!placemarkListEl || !map) return;
   placemarkListEl.innerHTML = '';
@@ -465,20 +511,7 @@ export async function initTravelPanel() {
           ? visitedIcon
           : defaultIcon;
       const m = L.marker([p.lat, p.lon], { icon }).addTo(map);
-      {
-        const popupDiv = document.createElement('div');
-        const title = document.createElement('div');
-        title.textContent = p.name;
-        const dir = document.createElement('a');
-        dir.href = `https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lon}`;
-        dir.target = '_blank';
-        dir.rel = 'noopener noreferrer';
-        dir.textContent = 'Directions';
-        dir.style.display = 'inline-block';
-        dir.style.marginTop = '4px';
-        popupDiv.append(title, dir);
-        m.bindPopup(popupDiv);
-      }
+      m.bindPopup(createPlacemarkPopup(p));
       markers.push(m);
       m.place = p;
       Object.defineProperty(p, 'marker', {
