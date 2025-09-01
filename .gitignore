@@ -5,3 +5,5 @@ doc.kml
 serviceAccountKey.json
 assets/travel/extra.kml
 docs/PLACES_SCALABILITY_PLAN.md
+firebase-config.js
+.env

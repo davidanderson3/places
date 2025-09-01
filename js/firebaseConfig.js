@@ -1,21 +1,27 @@
-// Public Firebase web config for the Places app.
-// Replace these values when moving to a new Firebase project.
+// Firebase configuration is expected to be provided externally.
+// Supply values via environment variables at build/deploy time or
+// by including a `firebase-config.js` file that assigns them to
+// `window.firebaseConfig` before this module is loaded.
 
-const DEFAULT_CONFIG = {
-  apiKey: "AIzaSyBbet_bmwm8h8G5CqvmzrdAnc3AO-0IKa8",
-  authDomain: "decision-maker-4e1d3.firebaseapp.com",
-  projectId: "decision-maker-4e1d3",
-  storageBucket: "decision-maker-4e1d3.firebasestorage.app",
-  messagingSenderId: "727689864651",
-  appId: "1:727689864651:web:0100c3894790b8c188c24e",
-  measurementId: "G-7EJVQN0WT3"
-};
+// Attempt to read config from Node-style environment variables.
+const envConfig = (typeof process !== 'undefined' && process.env && process.env.FIREBASE_API_KEY)
+  ? {
+      apiKey: process.env.FIREBASE_API_KEY,
+      authDomain: process.env.FIREBASE_AUTH_DOMAIN,
+      projectId: process.env.FIREBASE_PROJECT_ID,
+      storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
+      messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID,
+      appId: process.env.FIREBASE_APP_ID,
+      measurementId: process.env.FIREBASE_MEASUREMENT_ID,
+    }
+  : null;
 
-// Optionally allow runtime override (e.g., from a script tag before main.js):
-// <script>window.firebaseConfig = { apiKey: '...', projectId: '...' };</script>
-const config = (typeof window !== 'undefined' && window.firebaseConfig)
-  ? window.firebaseConfig
-  : DEFAULT_CONFIG;
+// Fallback to config injected on the window object.
+const config = envConfig || (typeof window !== 'undefined' && window.firebaseConfig) || {};
+
+if (!Object.keys(config).length) {
+  console.warn('Firebase configuration is missing.');
+}
 
 export default config;
 
