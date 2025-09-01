@@ -53,10 +53,12 @@ let userCoords = null;
 let showVisited = true;
 const pageSize = Infinity;
 let currentPage = 0;
+let placemarkListEl = null;
 
 function resizeTravelMap() {
   const mapEl = document.getElementById('travelMap');
   const tagFiltersEl = document.getElementById('travelTagFilters');
+  const listEl = document.getElementById('placemarkList');
   if (!mapEl) return;
   const rect = mapEl.getBoundingClientRect();
   const availableHeight = window.innerHeight - rect.top - 16;
@@ -65,9 +67,13 @@ function resizeTravelMap() {
   if (tagFiltersEl) {
     tagFiltersEl.style.height = `${height}px`;
   }
+  if (listEl) {
+    listEl.style.maxHeight = `${height}px`;
+  }
   if (map) {
     map.invalidateSize();
   }
+  updateVisiblePlacemarkList();
 }
 
 window.addEventListener('resize', resizeTravelMap);
@@ -124,6 +130,26 @@ function applyVisitedFlag(place) {
   }
 }
 
+function updateVisiblePlacemarkList() {
+  if (!placemarkListEl || !map) return;
+  placemarkListEl.innerHTML = '';
+  const bounds = map.getBounds();
+  markers.forEach(m => {
+    if (bounds.contains(m.getLatLng()) && m.place) {
+      const details = document.createElement('details');
+      const summary = document.createElement('summary');
+      summary.textContent = m.place.name || '';
+      details.appendChild(summary);
+      if (m.place.description) {
+        const desc = document.createElement('div');
+        desc.textContent = m.place.description;
+        details.appendChild(desc);
+      }
+      placemarkListEl.appendChild(details);
+    }
+  });
+}
+
 export async function initTravelPanel() {
   const panel = document.getElementById('travelPanel');
   if (!panel) return;
@@ -144,6 +170,7 @@ export async function initTravelPanel() {
   const resultsList = document.getElementById('placeResults');
   const searchPlaceBtn = document.getElementById('placeSearchBtn');
   const tagFiltersDiv = document.getElementById('travelTagFilters');
+  placemarkListEl = document.getElementById('placemarkList');
   const placeCountEl = document.getElementById('placeCount');
   const paginationDiv = document.getElementById('paginationControls');
   const prevPageBtn = document.getElementById('prevPageBtn');
@@ -168,6 +195,7 @@ export async function initTravelPanel() {
     attribution: '© OpenStreetMap contributors',
     noWrap: true
   }).addTo(map);
+  map.on('moveend', updateVisiblePlacemarkList);
   resizeTravelMap();
 
   async function openAddPlaceForm(lat, lon) {
@@ -452,6 +480,7 @@ export async function initTravelPanel() {
         m.bindPopup(popupDiv);
       }
       markers.push(m);
+      m.place = p;
       Object.defineProperty(p, 'marker', {
         value: m,
         enumerable: false,
@@ -682,6 +711,7 @@ export async function initTravelPanel() {
         // Don't auto-scroll to the map when selecting a place
       });
     });
+    updateVisiblePlacemarkList();
   };
 
   function updateSortIndicators() {

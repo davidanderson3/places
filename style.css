@@ -1472,6 +1472,10 @@ h2 {
   border: 1px solid #ccc;
 }
 
+#placemarkList {
+  display: none;
+}
+
 #travelTagFilters {
   flex: 1 1 100%;
   display: flex;
@@ -1536,6 +1540,14 @@ h2 {
   #travelMapWrapper {
     flex-wrap: nowrap;
   }
+  #placemarkList {
+    display: block;
+    flex: 0 0 200px;
+    max-width: 240px;
+    overflow-y: auto;
+    border: 1px solid #ccc;
+    padding: 4px;
+  }
   #travelMap {
     flex: 1 1 auto;
     min-width: 0; /* allow map to shrink without forcing wrap */
@@ -1544,6 +1556,10 @@ h2 {
     flex: 0 0 280px; /* fixed sidebar width */
     max-width: 320px;
   }
+}
+
+#placemarkList details {
+  margin-bottom: 4px;
 }
 
 #placeTags {
