@@ -3,7 +3,7 @@ import { getRandomPlaces } from './samplePlaces.js';
 import {
   pickDate,
   linkify
-} from './helpers.js';
+} from './travelUtils.js';
 
 const BASE_KEY = 'travelData';
 
