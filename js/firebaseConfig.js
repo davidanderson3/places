@@ -27,4 +27,8 @@ const config =
     ? window.firebaseConfig
     : DEFAULT_CONFIG;
 
+if (typeof window !== "undefined") {
+  window.__placesFirebaseConfig = config;
+}
+
 export default config;
