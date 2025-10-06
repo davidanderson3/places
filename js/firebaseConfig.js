@@ -8,14 +8,16 @@ const env =
   {};
 
 const DEFAULT_CONFIG = {
-  apiKey: env.FIREBASE_API_KEY || "secrets.APIKEY",
-  authDomain: env.FIREBASE_AUTH_DOMAIN || "secrets.AUTHDOMAIN",
-  projectId: env.FIREBASE_PROJECT_ID || "secrets.PROJECTID",
-  storageBucket: env.FIREBASE_STORAGE_BUCKET || "secrets.STORAGEBUCKET",
+  apiKey: env.FIREBASE_API_KEY || "AIzaSyCpcviq2fjNRJSLENqqpBrVPk0EHLU2PR8",
+  authDomain: env.FIREBASE_AUTH_DOMAIN || "decision-maker-4e1d3.firebaseapp.com",
+  projectId: env.FIREBASE_PROJECT_ID || "decision-maker-4e1d3",
+  storageBucket:
+    env.FIREBASE_STORAGE_BUCKET || "decision-maker-4e1d3.firebasestorage.app",
   messagingSenderId:
-    env.FIREBASE_MESSAGING_SENDER_ID || "secrets.MESSAGINGSENDERID",
-  appId: env.FIREBASE_APP_ID || "secrets.APPID",
-  measurementId: env.FIREBASE_MEASUREMENT_ID || "secrets.MEASUREMENTID",
+    env.FIREBASE_MESSAGING_SENDER_ID || "727689864651",
+  appId:
+    env.FIREBASE_APP_ID || "1:727689864651:web:0100c3894790b8c188c24e",
+  measurementId: env.FIREBASE_MEASUREMENT_ID || "G-7EJVQN0WT3",
 };
 
 // Optionally allow runtime override (e.g., from a script tag before main.js):
@@ -26,4 +28,3 @@ const config =
     : DEFAULT_CONFIG;
 
 export default config;
-

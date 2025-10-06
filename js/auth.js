@@ -7,7 +7,6 @@ import {
   persistentLocalCache,
   persistentMultipleTabManager
 } from "https://www.gstatic.com/firebasejs/10.11.0/firebase-firestore.js";
-import { clearDecisionsCache, clearGoalOrderCache } from './cache.js';
 import firebaseConfig from './firebaseConfig.js';
 
 export let currentUser = null;
@@ -74,8 +73,6 @@ export function initAuth({ loginBtn, logoutBtn, userEmail, bottomLoginBtn, botto
     try {
       const result = await firebase.auth().signInWithPopup(provider);
       currentUser = result.user;
-      clearDecisionsCache();
-      clearGoalOrderCache();
       safeSet(userEmail, 'textContent', currentUser.email);
       updateBottomBtn(currentUser);
       // onAuthStateChanged will trigger onLogin
@@ -89,8 +86,6 @@ export function initAuth({ loginBtn, logoutBtn, userEmail, bottomLoginBtn, botto
   const logoutAction = async () => {
     await auth.signOut();
     currentUser = null;
-    clearDecisionsCache();
-    clearGoalOrderCache();
     safeSet(userEmail, 'textContent', '');
     loginButtons.forEach(b => safeSet(b, 'style', 'display: inline-block'));
     logoutButtons.forEach(b => safeSet(b, 'style', 'display: none'));
@@ -102,8 +97,6 @@ export function initAuth({ loginBtn, logoutBtn, userEmail, bottomLoginBtn, botto
 
   auth.onAuthStateChanged(user => {
     currentUser = user;
-    clearDecisionsCache();
-    clearGoalOrderCache();
     safeSet(userEmail, 'textContent', user?.email || '');
     loginButtons.forEach(b => safeSet(b, 'style', user ? 'display:none' : 'display:inline-block'));
     logoutButtons.forEach(b => safeSet(b, 'style', user ? 'display:inline-block' : 'display:none'));

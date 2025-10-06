@@ -1,7 +1,6 @@
 import { initAuth } from './auth.js';
 import { initTabs } from './tabs.js';
 import { applySiteName } from './siteName.js';
-import { initDescriptions } from './descriptions.js';
 
 window.addEventListener('DOMContentLoaded', () => {
   if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
@@ -15,7 +14,6 @@ window.addEventListener('DOMContentLoaded', () => {
   }
 
   applySiteName();
-  initDescriptions();
 
   const uiRefs = {
     loginBtn: document.getElementById('loginBtn'),
@@ -26,4 +24,3 @@ window.addEventListener('DOMContentLoaded', () => {
     initTabs();
   });
 });
-
