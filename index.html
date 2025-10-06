@@ -27,6 +27,7 @@
       </div>
       <div class="tabs scroll-tabs" id="tabsContainer" style="visibility:hidden;">
         <button class="tab-button active" data-target="travelPanel">Places</button>
+        <button class="tab-button" data-target="eventsPanel">Events</button>
       </div>
     </nav>
 
@@ -69,6 +70,37 @@
           </thead>
           <tbody></tbody>
         </table>
+      </div>
+    </div>
+
+    <div id="eventsPanel" class="main-layout" style="display:none">
+      <div class="full-column events-panel">
+        <form id="eventsSearchForm" class="events-search" autocomplete="off">
+          <label class="events-field">
+            <span class="events-field-label">City</span>
+            <input id="eventsCityInput" type="text" placeholder="e.g., Boston" required />
+          </label>
+          <label class="events-field">
+            <span class="events-field-label">Keyword</span>
+            <input id="eventsKeywordInput" type="text" placeholder="Concert, festival..." />
+          </label>
+          <label class="events-field">
+            <span class="events-field-label">Country</span>
+            <select id="eventsCountrySelect">
+              <option value="US">United States</option>
+              <option value="CA">Canada</option>
+              <option value="GB">United Kingdom</option>
+              <option value="AU">Australia</option>
+              <option value="NZ">New Zealand</option>
+            </select>
+          </label>
+          <div class="events-search-actions">
+            <button type="submit">Search</button>
+            <button type="button" id="eventsClearBtn">Clear</button>
+          </div>
+        </form>
+        <div id="eventsStatus" class="events-status" role="status" aria-live="polite"></div>
+        <ul id="eventsResults" class="events-results"></ul>
       </div>
     </div>
   </section>
@@ -131,5 +163,6 @@
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script type="module" src="js/main.js?v=20250829"></script>
   <script type="module" src="js/travel.js?v=20250829"></script>
+  <script type="module" src="js/events.js?v=20250829"></script>
 </body>
 </html>
