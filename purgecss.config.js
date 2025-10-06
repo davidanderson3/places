@@ -3,7 +3,6 @@ module.exports = {
     // 1) point at every file that contains markup or class-names:
     content: [
         './index.html',
-        './report.html',
         './js/**/*.js'
     ],
     // 2) your stylesheets to clean:
