@@ -76,7 +76,23 @@ export function initAuth({ loginBtn, logoutBtn, userEmail, bottomLoginBtn, botto
       safeSet(userEmail, 'textContent', currentUser.email);
       updateBottomBtn(currentUser);
       // onAuthStateChanged will trigger onLogin
+      return;
     } catch (err) {
+      const shouldFallbackToRedirect =
+        err?.code === 'auth/operation-not-supported-in-this-environment' ||
+        err?.code === 'auth/unauthorized-domain' ||
+        err?.code === 'auth/admin-restricted-operation' ||
+        /requested action is invalid/i.test(err?.message || '');
+
+      if (shouldFallbackToRedirect) {
+        try {
+          await firebase.auth().signInWithRedirect(provider);
+          return;
+        } catch (redirectErr) {
+          console.error('Login redirect failed:', redirectErr);
+        }
+      }
+
       console.error('Login failed:', err);
     }
   };
