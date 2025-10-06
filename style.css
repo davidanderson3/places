@@ -845,7 +845,7 @@ button:hover {
 }
 
 .button-row button {
-  padding: 4px 0px;
+  padding: 4px 12px;
   margin: 0;
   height: 30px;
   font-size: 0.9em;
