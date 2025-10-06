@@ -1,7 +1,8 @@
-export const PANELS = ['travelPanel'];
+export const PANELS = ['travelPanel', 'eventsPanel'];
 
 export const PANEL_NAMES = {
-  travelPanel: 'Places'
+  travelPanel: 'Places',
+  eventsPanel: 'Events'
 };
 
 let tabsInitialized = false;
@@ -14,6 +15,10 @@ export function initTabs() {
 
   const tabButtons = Array.from(document.querySelectorAll('.tab-button'));
   const panels = PANELS;
+  const tabsContainer = document.getElementById('tabsContainer');
+  if (tabsContainer) {
+    tabsContainer.style.visibility = 'visible';
+  }
 
   tabButtons.forEach(btn => {
     btn.addEventListener('click', async () => {
@@ -30,7 +35,9 @@ export function initTabs() {
       history.pushState(null, '', `#${target}`);
 
       if (target === 'travelPanel') {
-        await window.initTravelPanel();
+        await window.initTravelPanel?.();
+      } else if (target === 'eventsPanel') {
+        await window.initEventsPanel?.();
       }
     });
   });
@@ -54,7 +61,9 @@ export function initTabs() {
 
   const runInitial = () => {
     if (initial === 'travelPanel') {
-      window.initTravelPanel();
+      window.initTravelPanel?.();
+    } else if (initial === 'eventsPanel') {
+      window.initEventsPanel?.();
     }
   };
 
