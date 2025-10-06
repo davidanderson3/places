@@ -43,6 +43,7 @@ let currentSearch = '';
 let rowMarkerMap = new Map();
 let markerRowMap = new Map();
 let selectedRow = null;
+let activeMarker = null;
 let allTags = [];
 let selectedTags = [];
 let resultMarkers = [];
@@ -104,6 +105,13 @@ const resultIcon = L.icon({
   iconSize: [24, 24],
   iconAnchor: [12, 12],
   popupAnchor: [0, -12],
+});
+
+const selectedIcon = L.icon({
+  iconUrl: createSvgUrl('#FFB300'),
+  iconSize: [28, 28],
+  iconAnchor: [14, 14],
+  popupAnchor: [0, -14],
 });
 
 function haversine(lat1, lon1, lat2, lon2) {
@@ -399,11 +407,42 @@ export async function initTravelPanel() {
     row.classList.add('selected-row');
   }
 
+  function setActiveMarker(marker, { panToMarker = false, openPopup = true } = {}) {
+    if (!marker || !map) return;
+    if (activeMarker && activeMarker !== marker && typeof activeMarker.setIcon === 'function') {
+      activeMarker.setIcon(activeMarker.defaultIcon || defaultIcon);
+    }
+    activeMarker = marker;
+    if (typeof marker.setIcon === 'function') {
+      marker.setIcon(selectedIcon);
+    }
+    if (panToMarker && typeof map.setView === 'function') {
+      const latLng =
+        typeof marker.getLatLng === 'function'
+          ? marker.getLatLng()
+          : marker.place
+          ? [marker.place.lat, marker.place.lon]
+          : null;
+      if (latLng) {
+        const currentZoom = typeof map.getZoom === 'function' ? map.getZoom() : 0;
+        const targetZoom = Math.max(currentZoom || 0, 14);
+        map.setView(latLng, targetZoom);
+      }
+    }
+    if (openPopup && typeof marker.openPopup === 'function') {
+      marker.openPopup();
+    }
+  }
+
   // Helper: bring a table row to the top and highlight it
   function bringRowToTop(row) {
     if (!row || !tableBody) return;
     tableBody.insertBefore(row, tableBody.firstChild);
     highlightRow(row);
+    const marker = rowMarkerMap.get(row);
+    if (marker) {
+      setActiveMarker(marker, { panToMarker: true });
+    }
   }
 
   function updatePagination(total) {
@@ -440,6 +479,7 @@ export async function initTravelPanel() {
     if (customItems) currentPage = 0;
     markers.forEach(m => m.remove());
     markers = [];
+    activeMarker = null;
     rowMarkerMap.clear();
     markerRowMap.clear();
     let items;
@@ -518,6 +558,7 @@ export async function initTravelPanel() {
       m.bindPopup(createPlacemarkPopup(p));
       markers.push(m);
       m.place = p;
+      m.defaultIcon = icon;
       Object.defineProperty(p, 'marker', {
         value: m,
         enumerable: false,
@@ -528,6 +569,8 @@ export async function initTravelPanel() {
         const row = markerRowMap.get(m);
         if (row) {
           bringRowToTop(row);
+        } else {
+          setActiveMarker(m);
         }
       });
       if (term && items.length === 1 && index === 0) {
@@ -742,8 +785,7 @@ export async function initTravelPanel() {
         if (e.target.closest('a')) return;
 
         highlightRow(tr);
-        map.setView([p.lat, p.lon], 14);
-        m.openPopup();
+        setActiveMarker(m, { panToMarker: true });
         // mapEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
         // Don't auto-scroll to the map when selecting a place
       });
@@ -1084,10 +1126,14 @@ export async function initTravelPanel() {
       li.textContent = p.name;
       li.classList.add('existing-place');
       li.addEventListener('click', () => {
-        map.setView([p.lat, p.lon], 14);
-        p.marker?.openPopup();
-        const row = p.marker ? markerRowMap.get(p.marker) : null;
-        if (row) highlightRow(row);
+        const marker = p.marker;
+        if (marker) {
+          setActiveMarker(marker, { panToMarker: true });
+          const row = markerRowMap.get(marker);
+          if (row) highlightRow(row);
+        } else {
+          map.setView([p.lat, p.lon], 14);
+        }
       });
       resultsList?.append(li);
     });
