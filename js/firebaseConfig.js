@@ -20,11 +20,17 @@ const DEFAULT_CONFIG = {
   measurementId: env.FIREBASE_MEASUREMENT_ID || "G-7EJVQN0WT3",
 };
 
-// Optionally allow runtime override (e.g., from a script tag before main.js):
-// <script>window.firebaseConfig = { apiKey: '...', projectId: '...' };</script>
-const config =
-  typeof window !== "undefined" && window.firebaseConfig
-    ? window.firebaseConfig
-    : DEFAULT_CONFIG;
+// Optionally allow runtime override (e.g., from firebase-config.js generated at build time).
+const runtimeConfig =
+  (typeof window !== "undefined" &&
+    (window.__FIREBASE_CONFIG__ || window.firebaseConfig)) ||
+  {};
+
+const config = Object.fromEntries(
+  Object.entries({
+    ...DEFAULT_CONFIG,
+    ...runtimeConfig
+  }).filter(([, value]) => Boolean(value))
+);
 
 export default config;

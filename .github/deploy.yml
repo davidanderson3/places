@@ -38,6 +38,9 @@ jobs:
           FIREBASE_MEASUREMENT_ID=${{ secrets.MEASUREMENTID }}
           EOF
 
+      - name: Generate Firebase client config
+        run: npm run build:firebase-config
+
       - name: Install dependencies
         run: npm ci
 
