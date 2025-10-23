@@ -4,6 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "start": "node scripts/devServer.js",
     "purge:css": "purgecss --config purgecss.config.js --output ./clean-css",
     "test": "vitest run",
     "build:firebase-config": "node scripts/generateFirebaseConfig.js",

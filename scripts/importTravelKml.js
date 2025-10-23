@@ -67,11 +67,11 @@ function parseKml(text) {
           if (d['@_name']) extended[d['@_name']] = d.value || '';
         });
       }
+      const visited = /icon-503-62AF44/.test(pm.styleUrl || '');
       return {
         name: pm.name?.trim() || 'Unknown',
         description: pm.description || '',
-        styleUrl: pm.styleUrl || '',
-        visited: /icon-503-62AF44/.test(pm.styleUrl || ''),
+        visited,
         lat,
         lon,
         ...extended,

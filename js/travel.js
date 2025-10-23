@@ -55,6 +55,7 @@ let showVisited = true;
 const pageSize = Infinity;
 let currentPage = 0;
 let placemarkListEl = null;
+let openEditorForPlace = () => {};
 
 function resizeTravelMap() {
   const mapEl = document.getElementById('travelMap');
@@ -136,26 +137,32 @@ function applyVisitedFlag(place) {
   if (typeof place.visited === 'undefined') {
     place.visited = /icon-503-62AF44/.test(place.styleUrl || '');
   }
+  if (Object.prototype.hasOwnProperty.call(place, 'styleUrl')) {
+    delete place.styleUrl;
+  }
 }
 
 function createPlacemarkPopup(place) {
   const container = document.createElement('div');
+  container.className = 'placemark-popup';
   if (place.name) {
     const title = document.createElement('div');
     title.textContent = place.name;
     title.style.fontWeight = 'bold';
+    title.className = 'placemark-popup__title';
     container.appendChild(title);
   }
   const table = document.createElement('table');
-  table.style.marginTop = '4px';
+  table.className = 'placemark-popup__table';
+  const hiddenKeys = new Set(['name', 'marker', 'id', 'lat', 'lon', 'styleUrl']);
   Object.entries(place).forEach(([key, value]) => {
-    if (key === 'name' || key === 'marker') return;
+    if (hiddenKeys.has(key)) return;
     const row = document.createElement('tr');
     const labelCell = document.createElement('td');
-    labelCell.style.fontWeight = 'bold';
-    labelCell.style.paddingRight = '4px';
+    labelCell.className = 'placemark-popup__label';
     labelCell.textContent = key;
     const valueCell = document.createElement('td');
+    valueCell.className = 'placemark-popup__value';
     let display = value;
     if (Array.isArray(display)) display = display.join(', ');
     else if (typeof display === 'boolean') display = display ? 'Yes' : 'No';
@@ -169,9 +176,10 @@ function createPlacemarkPopup(place) {
   });
   const dirRow = document.createElement('tr');
   const dirLabel = document.createElement('td');
-  dirLabel.style.fontWeight = 'bold';
+  dirLabel.className = 'placemark-popup__label';
   dirLabel.textContent = 'Directions';
   const dirCell = document.createElement('td');
+  dirCell.className = 'placemark-popup__value';
   const dirLink = document.createElement('a');
   dirLink.href = `https://www.google.com/maps/dir/?api=1&destination=${place.lat},${place.lon}`;
   dirLink.target = '_blank';
@@ -181,6 +189,19 @@ function createPlacemarkPopup(place) {
   dirRow.append(dirLabel, dirCell);
   table.appendChild(dirRow);
   container.appendChild(table);
+  const actionRow = document.createElement('div');
+  actionRow.className = 'placemark-popup__actions';
+  const editBtn = document.createElement('button');
+  editBtn.type = 'button';
+  editBtn.className = 'placemark-popup__edit-btn';
+  editBtn.textContent = 'Edit place';
+  editBtn.addEventListener('click', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    openEditorForPlace(place);
+  });
+  actionRow.appendChild(editBtn);
+  container.appendChild(actionRow);
   return container;
 }
 
@@ -407,6 +428,26 @@ export async function initTravelPanel() {
     row.classList.add('selected-row');
   }
 
+  openEditorForPlace = function(place) {
+    if (!place || !tableBody) return;
+    let row = null;
+    if (place.marker && markerRowMap.has(place.marker)) {
+      row = markerRowMap.get(place.marker);
+    }
+    if (!row) {
+      row = Array.from(tableBody.rows || []).find(r => r.placeRef === place);
+    }
+    if (!row) return;
+    highlightRow(row);
+    if (typeof row.scrollIntoView === 'function') {
+      row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+    const editBtn = row.querySelector('.row-edit-btn');
+    if (editBtn) {
+      editBtn.click();
+    }
+  };
+
   function setActiveMarker(marker, { panToMarker = false, openPopup = true } = {}) {
     if (!marker || !map) return;
     if (activeMarker && activeMarker !== marker && typeof activeMarker.setIcon === 'function') {
@@ -550,10 +591,7 @@ export async function initTravelPanel() {
     }
 
     pageItems.forEach((p, index) => {
-      const icon =
-        p.visited || /icon-503-62AF44/.test(p.styleUrl)
-          ? visitedIcon
-          : defaultIcon;
+      const icon = p.visited ? visitedIcon : defaultIcon;
       const m = L.marker([p.lat, p.lon], { icon }).addTo(map);
       m.bindPopup(createPlacemarkPopup(p));
       markers.push(m);
@@ -578,6 +616,7 @@ export async function initTravelPanel() {
         m.openPopup();
       }
       const tr = document.createElement('tr');
+      tr.placeRef = p;
       const nameTd = document.createElement('td');
       const nameLink = document.createElement('a');
       nameLink.href = `https://www.google.com/search?q=${encodeURIComponent(p.name)}`;
@@ -616,6 +655,7 @@ export async function initTravelPanel() {
       const editBtn = document.createElement('button');
       editBtn.textContent = '✏️';
       editBtn.title = 'Edit';
+      editBtn.className = 'row-edit-btn';
       Object.assign(editBtn.style, { background: 'none', border: 'none', cursor: 'pointer' });
       editBtn.addEventListener('click', e => {
         e.stopPropagation();
