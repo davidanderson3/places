@@ -1,12 +1,11 @@
-const CACHE_NAME = 'places-cache-v4';
+const CACHE_NAME = 'places-cache-v5';
 const OFFLINE_URLS = [
   './',
   './index.html',
   './style.css',
   './js/main.js',
   './js/travel.js',
-  './js/travelUtils.js',
-  './js/events.js'
+  './js/travelUtils.js'
 ];
 
 self.addEventListener('install', event => {

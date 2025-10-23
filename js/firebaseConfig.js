@@ -8,7 +8,7 @@ const env =
   {};
 
 const DEFAULT_CONFIG = {
-  apiKey: env.FIREBASE_API_KEY || "AIzaSyCpcviq2fjNRJSLENqqpBrVPk0EHLU2PR8",
+  apiKey: env.FIREBASE_API_KEY || "AIzaSyBbet_bmwm8h8G5CqvmzrdAnc3AO-0IKa8",
   authDomain: env.FIREBASE_AUTH_DOMAIN || "decision-maker-4e1d3.firebaseapp.com",
   projectId: env.FIREBASE_PROJECT_ID || "decision-maker-4e1d3",
   storageBucket:

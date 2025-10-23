@@ -1,9 +1,4 @@
-export const PANELS = ['travelPanel', 'eventsPanel'];
-
-export const PANEL_NAMES = {
-  travelPanel: 'Places',
-  eventsPanel: 'Events'
-};
+export const PANELS = ['travelPanel'];
 
 let tabsInitialized = false;
 
@@ -15,9 +10,14 @@ export function initTabs() {
 
   const tabButtons = Array.from(document.querySelectorAll('.tab-button'));
   const panels = PANELS;
-  const tabsContainer = document.getElementById('tabsContainer');
-  if (tabsContainer) {
-    tabsContainer.style.visibility = 'visible';
+
+  if (tabButtons.length === 0) {
+    panels.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.style.display = id === 'travelPanel' ? 'flex' : 'none';
+    });
+    window.initTravelPanel?.();
+    return;
   }
 
   tabButtons.forEach(btn => {
@@ -36,8 +36,6 @@ export function initTabs() {
 
       if (target === 'travelPanel') {
         await window.initTravelPanel?.();
-      } else if (target === 'eventsPanel') {
-        await window.initEventsPanel?.();
       }
     });
   });
@@ -62,8 +60,6 @@ export function initTabs() {
   const runInitial = () => {
     if (initial === 'travelPanel') {
       window.initTravelPanel?.();
-    } else if (initial === 'eventsPanel') {
-      window.initEventsPanel?.();
     }
   };
 
@@ -73,4 +69,3 @@ export function initTabs() {
     runInitial();
   }
 }
-
