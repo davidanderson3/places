@@ -33,4 +33,8 @@ const config = Object.fromEntries(
   }).filter(([, value]) => Boolean(value))
 );
 
+if (typeof window !== "undefined") {
+  window.__placesFirebaseConfig = config;
+}
+
 export default config;
