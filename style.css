@@ -1530,7 +1530,7 @@ h2 {
 
 #travelMapWrapper {
   display: flex;
-  align-items: flex-start;
+  align-items: stretch;
   gap: 8px;
   flex-wrap: wrap;
   margin: 0;
@@ -1547,20 +1547,112 @@ h2 {
   display: none;
 }
 
-#travelTagFilters {
+#placemarkDetails {
   flex: 1 1 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  height: 300px;
+  border: 1px solid #ccc;
+  padding: 8px;
+  box-sizing: border-box;
+  min-height: 160px;
   overflow-y: auto;
-  overflow-x: hidden;
+  background: #fff;
+}
+
+.placemark-details-placeholder {
+  color: #666;
+  font-style: italic;
+}
+
+.placemark-details__title {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.placemark-details__description {
+  margin-bottom: 8px;
+  line-height: 1.4;
+}
+
+.placemark-details__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.placemark-details__tag {
+  background: #eef2f7;
+  border-radius: 12px;
+  padding: 4px 10px;
+  font-size: 0.85rem;
+  color: #3a4a5a;
+}
+
+.placemark-details__list {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 8px;
+  row-gap: 4px;
+  margin: 0 0 12px;
+}
+
+.placemark-details__list dt {
+  font-weight: 600;
+  color: #4a4a4a;
+}
+
+.placemark-details__list dd {
+  margin: 0;
+  color: #333;
+}
+
+.placemark-details__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 12px;
+}
+
+.placemark-details__edit-btn {
+  background-color: #7aa68c;
+  color: #fff;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.placemark-details__edit-btn:hover {
+  background-color: #638b76;
+}
+
+.placemark-details__directions {
+  color: #0066cc;
+  text-decoration: none;
+}
+
+.placemark-details__directions:hover {
+  text-decoration: underline;
+}
+
+#travelTagFilters {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-start;
   position: relative;
+  padding: 8px;
+  border: 1px solid #ccc;
+  background: #fff;
+  box-sizing: border-box;
 }
 
 #travelTagFilters .tags-header {
   font-weight: 600;
-  margin-bottom: 4px;
+  flex: 1 1 100%;
 }
 
 /* Scroll hint arrows for tag list */
@@ -1623,9 +1715,12 @@ h2 {
     flex: 1 1 auto;
     min-width: 0; /* allow map to shrink without forcing wrap */
   }
+  #placemarkDetails {
+    flex: 0 0 320px;
+    max-width: 360px;
+  }
   #travelTagFilters {
-    flex: 0 0 280px; /* fixed sidebar width */
-    max-width: 320px;
+    margin-top: 16px;
   }
 }
 
@@ -1653,10 +1748,10 @@ h2 {
 }
 
 #travelTagFilters button {
-  width: 100%;
-  margin-bottom: 4px;
+  margin: 0;
   box-sizing: border-box;
   white-space: normal;
+  flex: 0 0 auto;
 }
 
 #showVisitedLabel {

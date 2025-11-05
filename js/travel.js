@@ -55,22 +55,29 @@ let showVisited = true;
 const pageSize = Infinity;
 let currentPage = 0;
 let placemarkListEl = null;
-let openEditorForPlace = () => {};
+let placemarkDetailsEl = null;
+let selectedPlaceRef = null;
+let detailsEditState = { place: null, editing: false };
+let savePlaceEdits = null;
 
 function resizeTravelMap() {
   const mapEl = document.getElementById('travelMap');
-  const tagFiltersEl = document.getElementById('travelTagFilters');
   const listEl = document.getElementById('placemarkList');
+  const detailsEl = document.getElementById('placemarkDetails');
   if (!mapEl) return;
   const rect = mapEl.getBoundingClientRect();
   const availableHeight = window.innerHeight - rect.top - 16;
   const height = Math.min(rect.width, availableHeight);
   mapEl.style.height = `${height}px`;
-  if (tagFiltersEl) {
-    tagFiltersEl.style.height = `${height}px`;
-  }
   if (listEl) {
     listEl.style.maxHeight = `${height}px`;
+  }
+  if (detailsEl) {
+    if (window.innerWidth >= 1024) {
+      detailsEl.style.maxHeight = `${height}px`;
+    } else {
+      detailsEl.style.maxHeight = '';
+    }
   }
   if (map) {
     map.invalidateSize();
@@ -142,67 +149,277 @@ function applyVisitedFlag(place) {
   }
 }
 
-function createPlacemarkPopup(place) {
-  const container = document.createElement('div');
-  container.className = 'placemark-popup';
-  if (place.name) {
-    const title = document.createElement('div');
-    title.textContent = place.name;
-    title.style.fontWeight = 'bold';
-    title.className = 'placemark-popup__title';
-    container.appendChild(title);
-  }
-  const table = document.createElement('table');
-  table.className = 'placemark-popup__table';
-  const hiddenKeys = new Set(['name', 'marker', 'id', 'lat', 'lon', 'styleUrl']);
-  Object.entries(place).forEach(([key, value]) => {
-    if (hiddenKeys.has(key)) return;
-    const row = document.createElement('tr');
-    const labelCell = document.createElement('td');
-    labelCell.className = 'placemark-popup__label';
-    labelCell.textContent = key;
-    const valueCell = document.createElement('td');
-    valueCell.className = 'placemark-popup__value';
-    let display = value;
-    if (Array.isArray(display)) display = display.join(', ');
-    else if (typeof display === 'boolean') display = display ? 'Yes' : 'No';
-    if (typeof display === 'string') {
-      valueCell.innerHTML = linkify(display);
-    } else {
-      valueCell.textContent = display ?? '';
+function renderDetailsPlaceholder(message = 'Select a place to see details.') {
+  if (!placemarkDetailsEl) return;
+  placemarkDetailsEl.innerHTML = '';
+  const placeholder = document.createElement('div');
+  placeholder.className = 'placemark-details-placeholder';
+  placeholder.textContent = message;
+  placemarkDetailsEl.appendChild(placeholder);
+}
+
+function renderSearchResultDetails(result, { onAdd } = {}) {
+    if (!placemarkDetailsEl) return;
+    selectedPlaceRef = null;
+    detailsEditState = { place: null, editing: false };
+    placemarkDetailsEl.innerHTML = '';
+
+    const titleEl = document.createElement('div');
+    titleEl.className = 'placemark-details__title';
+    titleEl.textContent = result.title || 'Search result';
+    placemarkDetailsEl.appendChild(titleEl);
+
+    if (result.description) {
+      const desc = document.createElement('div');
+      desc.className = 'placemark-details__description';
+      desc.textContent = result.description;
+      placemarkDetailsEl.appendChild(desc);
     }
-    row.append(labelCell, valueCell);
-    table.appendChild(row);
-  });
-  const dirRow = document.createElement('tr');
-  const dirLabel = document.createElement('td');
-  dirLabel.className = 'placemark-popup__label';
-  dirLabel.textContent = 'Directions';
-  const dirCell = document.createElement('td');
-  dirCell.className = 'placemark-popup__value';
-  const dirLink = document.createElement('a');
-  dirLink.href = `https://www.google.com/maps/dir/?api=1&destination=${place.lat},${place.lon}`;
-  dirLink.target = '_blank';
-  dirLink.rel = 'noopener noreferrer';
-  dirLink.textContent = 'Open in Maps';
-  dirCell.appendChild(dirLink);
-  dirRow.append(dirLabel, dirCell);
-  table.appendChild(dirRow);
-  container.appendChild(table);
-  const actionRow = document.createElement('div');
-  actionRow.className = 'placemark-popup__actions';
-  const editBtn = document.createElement('button');
-  editBtn.type = 'button';
-  editBtn.className = 'placemark-popup__edit-btn';
-  editBtn.textContent = 'Edit place';
-  editBtn.addEventListener('click', e => {
-    e.preventDefault();
-    e.stopPropagation();
-    openEditorForPlace(place);
-  });
-  actionRow.appendChild(editBtn);
-  container.appendChild(actionRow);
-  return container;
+
+    const actions = document.createElement('div');
+    actions.className = 'placemark-details__actions';
+
+    if (typeof onAdd === 'function') {
+      const addBtn = document.createElement('button');
+      addBtn.type = 'button';
+      addBtn.className = 'placemark-details__edit-btn';
+      addBtn.textContent = 'Add to my places';
+      addBtn.addEventListener('click', () => onAdd());
+      actions.append(addBtn);
+    }
+
+    if (Number.isFinite(result.lat) && Number.isFinite(result.lon)) {
+      const directionsLink = document.createElement('a');
+      directionsLink.className = 'placemark-details__directions';
+      directionsLink.href = `https://www.google.com/maps/dir/?api=1&destination=${result.lat},${result.lon}`;
+      directionsLink.target = '_blank';
+      directionsLink.rel = 'noopener noreferrer';
+      directionsLink.textContent = 'Get Directions';
+      actions.append(directionsLink);
+    }
+
+    if (actions.childElementCount > 0) {
+      placemarkDetailsEl.appendChild(actions);
+    }
+}
+
+function renderPlacemarkDetails(place) {
+  if (!placemarkDetailsEl) return;
+  if (!place) {
+    renderDetailsPlaceholder();
+    return;
+  }
+
+  const editing = detailsEditState.editing && detailsEditState.place === place;
+  placemarkDetailsEl.innerHTML = '';
+
+  const title = document.createElement('div');
+  title.className = 'placemark-details__title';
+  title.textContent = place.name || 'Untitled place';
+  placemarkDetailsEl.appendChild(title);
+
+  if (place.description) {
+    const desc = document.createElement('div');
+    desc.className = 'placemark-details__description';
+    desc.innerHTML = linkify(place.description);
+    placemarkDetailsEl.appendChild(desc);
+  }
+
+  if (Array.isArray(place.tags) && place.tags.length) {
+    const tagsSection = document.createElement('div');
+    tagsSection.className = 'placemark-details__tags';
+    place.tags.forEach(tag => {
+      const chip = document.createElement('span');
+      chip.className = 'placemark-details__tag';
+      chip.textContent = tag;
+      tagsSection.appendChild(chip);
+    });
+    placemarkDetailsEl.appendChild(tagsSection);
+  }
+
+  const infoList = document.createElement('dl');
+  infoList.className = 'placemark-details__list';
+
+  const addInfoRow = (label, value) => {
+    if (value === undefined || value === null || value === '') return;
+    const dt = document.createElement('dt');
+    dt.textContent = label;
+    const dd = document.createElement('dd');
+    dd.textContent = value;
+    infoList.append(dt, dd);
+  };
+
+  addInfoRow('Rating', place.Rating);
+  addInfoRow('Date', place.Date);
+  addInfoRow('Visited', place.visited ? 'Yes' : 'No');
+
+  const lat = Number(place.lat);
+  const lon = Number(place.lon);
+  const hasCoords = Number.isFinite(lat) && Number.isFinite(lon);
+  if (hasCoords && userCoords) {
+    const dist = haversine(userCoords[0], userCoords[1], lat, lon);
+    addInfoRow('Distance from you', `${dist.toFixed(1)} mi`);
+  }
+
+  if (infoList.childElementCount) {
+    placemarkDetailsEl.appendChild(infoList);
+  }
+
+  let tagListId = null;
+  const actions = document.createElement('div');
+  actions.className = 'placemark-details__actions';
+
+  if (editing) {
+    const form = document.createElement('form');
+    form.className = 'placemark-details__form';
+
+    const makeField = (labelText, inputEl) => {
+      const wrapper = document.createElement('label');
+      wrapper.className = 'placemark-details__form-field';
+      const label = document.createElement('span');
+      label.textContent = labelText;
+      wrapper.append(label, inputEl);
+      return wrapper;
+    };
+
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.value = place.name || '';
+    nameInput.required = true;
+    form.append(makeField('Name', nameInput));
+
+    const descInput = document.createElement('textarea');
+    descInput.value = place.description || '';
+    descInput.rows = 3;
+    form.append(makeField('Description', descInput));
+
+    const tagsInput = document.createElement('input');
+    tagsInput.type = 'text';
+    tagsInput.value = Array.isArray(place.tags) ? place.tags.join(', ') : '';
+    const tagList = document.createElement('datalist');
+    tagListId = `tag-list-${Date.now()}-${Math.random()}`;
+    tagList.id = tagListId;
+    tagsInput.setAttribute('list', tagListId);
+    const updateTagSuggestions = () => {
+      const val = tagsInput.value;
+      const parts = val.split(',');
+      const partial = parts.pop().trim().toLowerCase();
+      const prefix = parts.map(t => t.trim()).filter(Boolean).join(', ');
+      const used = parts.map(t => t.trim()).filter(Boolean);
+      tagList.innerHTML = '';
+      allTags
+        .filter(t => t.toLowerCase().startsWith(partial) && !used.includes(t))
+        .forEach(t => {
+          const option = document.createElement('option');
+          option.value = prefix ? `${prefix}, ${t}` : t;
+          tagList.appendChild(option);
+        });
+    };
+    tagsInput.addEventListener('input', updateTagSuggestions);
+    updateTagSuggestions();
+    form.append(makeField('Tags', tagsInput));
+    form.append(tagList);
+
+    const ratingInput = document.createElement('input');
+    ratingInput.type = 'text';
+    ratingInput.value = place.Rating || '';
+    form.append(makeField('Rating', ratingInput));
+
+    const dateInput = document.createElement('input');
+    dateInput.type = 'date';
+    dateInput.value = place.Date || '';
+    form.append(makeField('Date', dateInput));
+
+    const visitedWrapper = document.createElement('label');
+    visitedWrapper.className = 'placemark-details__form-field placemark-details__form-field--inline';
+    const visitedCheckbox = document.createElement('input');
+    visitedCheckbox.type = 'checkbox';
+    visitedCheckbox.checked = !!place.visited;
+    const visitedText = document.createElement('span');
+    visitedText.textContent = 'Visited';
+    visitedWrapper.append(visitedCheckbox, visitedText);
+    form.append(visitedWrapper);
+
+    const buttonRow = document.createElement('div');
+    buttonRow.className = 'placemark-details__form-actions';
+    const saveBtn = document.createElement('button');
+    saveBtn.type = 'submit';
+    saveBtn.textContent = 'Save';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.textContent = 'Cancel';
+    buttonRow.append(saveBtn, cancelBtn);
+    form.append(buttonRow);
+
+    form.addEventListener('submit', async e => {
+      e.preventDefault();
+      const name = nameInput.value.trim();
+      if (!name) {
+        nameInput.focus();
+        return;
+      }
+      const tags = tagsInput.value
+        .split(',')
+        .map(t => t.trim())
+        .filter(Boolean);
+      const updates = {
+        name,
+        description: descInput.value.trim(),
+        tags,
+        Rating: ratingInput.value.trim(),
+        Date: dateInput.value.trim(),
+        visited: visitedCheckbox.checked,
+      };
+      try {
+        detailsEditState = { place, editing: false };
+        if (typeof savePlaceEdits === 'function') {
+          await savePlaceEdits(place, updates);
+        } else {
+          Object.assign(place, updates);
+          ensureDefaultTag(place);
+          renderPlacemarkDetails(place);
+        }
+      } catch (err) {
+        console.error('Failed to save place', err);
+        detailsEditState = { place, editing: true };
+        renderPlacemarkDetails(place);
+      }
+    });
+
+    cancelBtn.addEventListener('click', e => {
+      e.preventDefault();
+      detailsEditState = { place, editing: false };
+      renderPlacemarkDetails(place);
+    });
+
+    placemarkDetailsEl.appendChild(form);
+  } else {
+    const editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.className = 'placemark-details__edit-btn';
+    editBtn.textContent = 'Edit place';
+    editBtn.addEventListener('click', e => {
+      e.preventDefault();
+      e.stopPropagation();
+      detailsEditState = { place, editing: true };
+      renderPlacemarkDetails(place);
+    });
+    actions.append(editBtn);
+  }
+
+  if (hasCoords) {
+    const directionsLink = document.createElement('a');
+    directionsLink.className = 'placemark-details__directions';
+    directionsLink.href = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}`;
+    directionsLink.target = '_blank';
+    directionsLink.rel = 'noopener noreferrer';
+    directionsLink.textContent = 'Get Directions';
+    actions.append(directionsLink);
+  }
+
+  if (actions.childElementCount > 0) {
+    placemarkDetailsEl.appendChild(actions);
+  }
 }
 
 function updateVisiblePlacemarkList() {
@@ -246,6 +463,7 @@ export async function initTravelPanel() {
   const searchPlaceBtn = document.getElementById('placeSearchBtn');
   const tagFiltersDiv = document.getElementById('travelTagFilters');
   placemarkListEl = document.getElementById('placemarkList');
+  placemarkDetailsEl = document.getElementById('placemarkDetails');
   const placeCountEl = document.getElementById('placeCount');
   const paginationDiv = document.getElementById('paginationControls');
   const prevPageBtn = document.getElementById('prevPageBtn');
@@ -276,6 +494,7 @@ export async function initTravelPanel() {
   }).addTo(map);
   map.on('moveend', updateVisiblePlacemarkList);
   resizeTravelMap();
+  renderPlacemarkDetails(null);
 
   async function openAddPlaceForm(lat, lon) {
     if (!addPlaceModal || !addPlaceForm || !placeTagsDiv) {
@@ -361,6 +580,41 @@ export async function initTravelPanel() {
   let pendingAdds = [];
   let pendingUpdates = [];
   let pendingDeletes = [];
+  const persistPlaceUpdates = async (place, updates) => {
+    place.name = updates.name;
+    place.description = updates.description;
+    place.tags = updates.tags;
+    ensureDefaultTag(place);
+    place.Rating = updates.Rating;
+    place.Date = updates.Date;
+    place.visited = updates.visited;
+    const user = getCurrentUser?.();
+    if (user) {
+      localStorage.setItem(storageKey(), JSON.stringify(travelData));
+      if (place.id) {
+        if (initialRemoteLoadComplete) {
+          try {
+            await db
+              .collection('users')
+              .doc(user.uid)
+              .collection('travel')
+              .doc(place.id)
+              .set(place, { merge: true });
+          } catch (err) {
+            console.error('Failed to update place', err);
+          }
+        } else {
+          pendingUpdates.push({ id: place.id, data: JSON.parse(JSON.stringify(place)) });
+        }
+      }
+    } else {
+      localStorage.setItem(storageKey(), JSON.stringify(travelData));
+    }
+    allTags = Array.from(new Set(travelData.flatMap(pl => pl.tags || []))).sort();
+    renderTagFilters();
+    renderList(currentSearch);
+  };
+  savePlaceEdits = persistPlaceUpdates;
 
   const user = getCurrentUser?.();
   const cached = user ? localStorage.getItem(storageKey()) : null;
@@ -428,27 +682,7 @@ export async function initTravelPanel() {
     row.classList.add('selected-row');
   }
 
-  openEditorForPlace = function(place) {
-    if (!place || !tableBody) return;
-    let row = null;
-    if (place.marker && markerRowMap.has(place.marker)) {
-      row = markerRowMap.get(place.marker);
-    }
-    if (!row) {
-      row = Array.from(tableBody.rows || []).find(r => r.placeRef === place);
-    }
-    if (!row) return;
-    highlightRow(row);
-    if (typeof row.scrollIntoView === 'function') {
-      row.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
-    const editBtn = row.querySelector('.row-edit-btn');
-    if (editBtn) {
-      editBtn.click();
-    }
-  };
-
-  function setActiveMarker(marker, { panToMarker = false, openPopup = true } = {}) {
+  function setActiveMarker(marker, { panToMarker = false } = {}) {
     if (!marker || !map) return;
     if (activeMarker && activeMarker !== marker && typeof activeMarker.setIcon === 'function') {
       activeMarker.setIcon(activeMarker.defaultIcon || defaultIcon);
@@ -457,6 +691,9 @@ export async function initTravelPanel() {
     if (typeof marker.setIcon === 'function') {
       marker.setIcon(selectedIcon);
     }
+    selectedPlaceRef = marker.place || null;
+    detailsEditState = { place: selectedPlaceRef, editing: false };
+    renderPlacemarkDetails(selectedPlaceRef);
     if (panToMarker && typeof map.setView === 'function') {
       const latLng =
         typeof marker.getLatLng === 'function'
@@ -469,9 +706,6 @@ export async function initTravelPanel() {
         const targetZoom = Math.max(currentZoom || 0, 14);
         map.setView(latLng, targetZoom);
       }
-    }
-    if (openPopup && typeof marker.openPopup === 'function') {
-      marker.openPopup();
     }
   }
 
@@ -518,6 +752,7 @@ export async function initTravelPanel() {
   const renderList = (term = '', customItems = null) => {
     tableBody.innerHTML = '';
     if (customItems) currentPage = 0;
+    const previousSelection = selectedPlaceRef;
     markers.forEach(m => m.remove());
     markers = [];
     activeMarker = null;
@@ -534,6 +769,15 @@ export async function initTravelPanel() {
             (Array.isArray(p.tags) && selectedTags.some(t => p.tags.includes(t)))) &&
           (showVisited || !p.visited)
       );
+    }
+    const selectionStillVisible =
+      previousSelection && items.includes(previousSelection);
+    if (!selectionStillVisible) {
+      selectedPlaceRef = null;
+      detailsEditState = { place: null, editing: false };
+    }
+    if (!detailsEditState.editing) {
+      renderPlacemarkDetails(selectionStillVisible ? previousSelection : null);
     }
 
     // Sorting
@@ -590,10 +834,9 @@ export async function initTravelPanel() {
         total === 0 ? 'Showing 0 of 0' : `Showing ${start + 1}-${end} of ${total}`;
     }
 
-    pageItems.forEach((p, index) => {
+    pageItems.forEach(p => {
       const icon = p.visited ? visitedIcon : defaultIcon;
       const m = L.marker([p.lat, p.lon], { icon }).addTo(map);
-      m.bindPopup(createPlacemarkPopup(p));
       markers.push(m);
       m.place = p;
       m.defaultIcon = icon;
@@ -611,10 +854,6 @@ export async function initTravelPanel() {
           setActiveMarker(m);
         }
       });
-      if (term && items.length === 1 && index === 0) {
-        map.setView([p.lat, p.lon], 14);
-        m.openPopup();
-      }
       const tr = document.createElement('tr');
       tr.placeRef = p;
       const nameTd = document.createElement('td');
@@ -750,36 +989,22 @@ export async function initTravelPanel() {
 
         form.addEventListener('submit', async ev => {
           ev.preventDefault();
-          p.name = nameInput.value.trim();
-          p.description = descInput.value.trim();
-          p.tags = tagsInput.value.split(',').map(t => t.trim()).filter(Boolean);
-          ensureDefaultTag(p);
-          p.Rating = ratingInput.value.trim();
-          p.Date = dateInput.value.trim();
-          p.visited = visitedInput.checked;
-          const user = getCurrentUser?.();
-          if (user) {
-            localStorage.setItem(storageKey(), JSON.stringify(travelData));
-            if (p.id) {
-              if (initialRemoteLoadComplete) {
-                try {
-                  await db
-                    .collection('users')
-                    .doc(user.uid)
-                    .collection('travel')
-                    .doc(p.id)
-                    .set(p, { merge: true });
-                } catch (err) {
-                  console.error('Failed to update place', err);
-                }
-              } else {
-                pendingUpdates.push({ id: p.id, data: JSON.parse(JSON.stringify(p)) });
-              }
-            }
+          const updates = {
+            name: nameInput.value.trim(),
+            description: descInput.value.trim(),
+            tags: tagsInput.value
+              .split(',')
+              .map(t => t.trim())
+              .filter(Boolean),
+            Rating: ratingInput.value.trim(),
+            Date: dateInput.value.trim(),
+            visited: visitedInput.checked,
+          };
+          try {
+            await persistPlaceUpdates(p, updates);
+          } catch (err) {
+            console.error('Failed to update place', err);
           }
-          allTags = Array.from(new Set(travelData.flatMap(pl => pl.tags || []))).sort();
-          renderTagFilters();
-          renderList(currentSearch);
         });
         cancelBtn.addEventListener('click', e2 => {
           e2.preventDefault();
@@ -818,6 +1043,10 @@ export async function initTravelPanel() {
       tableBody.append(tr);
       rowMarkerMap.set(tr, m);
       markerRowMap.set(m, tr);
+      if (selectedPlaceRef === p) {
+        highlightRow(tr);
+        setActiveMarker(m);
+      }
 
       tr.addEventListener('click', e => {
         // If the user clicked a link inside the row, allow the link to
@@ -910,36 +1139,46 @@ export async function initTravelPanel() {
           li.addEventListener('click', () => {
             if (!placeInput) return;
             placeInput.value = res.display_name;
-            // clear any prior markers and suggestions
             clearSearchResults();
             resultsList.innerHTML = '';
             const latitude = parseFloat(res.lat);
             const longitude = parseFloat(res.lon);
             const m = L.marker([latitude, longitude], { icon: resultIcon }).addTo(map);
             resultMarkers.push(m);
-          const popupDiv = document.createElement('div');
-          const title = document.createElement('div');
-          title.textContent = res.display_name;
-          const btn = document.createElement('button');
-          btn.textContent = 'Add to list';
-          const dir = document.createElement('a');
-          dir.href = `https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}`;
-          dir.target = '_blank';
-          dir.rel = 'noopener noreferrer';
-          dir.textContent = 'Directions';
-          dir.style.display = 'inline-block';
-          dir.style.marginTop = '4px';
-          popupDiv.append(title, btn, dir);
-          m.bindPopup(popupDiv);
-            btn.addEventListener('click', async () => {
-              const name = prompt('Place name:', res.display_name.split(',')[0]);
-              if (!name) return;
-              await storePlace({ name, description: '', lat: latitude, lon: longitude, tags: [], Rating: '', Date: '', visited: false });
-              clearSearchResults();
-              placeInput.value = '';
+            const showDetails = () =>
+              renderSearchResultDetails(
+                {
+                  title: res.display_name.split(',')[0] || res.display_name,
+                  description: res.display_name,
+                  lat: latitude,
+                  lon: longitude,
+                },
+                {
+                  onAdd: async () => {
+                    const name =
+                      prompt('Place name:', res.display_name.split(',')[0] || res.display_name) || '';
+                    if (!name.trim()) return;
+                    await storePlace({
+                      name: name.trim(),
+                      description: '',
+                      lat: latitude,
+                      lon: longitude,
+                      tags: [],
+                      Rating: '',
+                      Date: '',
+                      visited: false
+                    });
+                    clearSearchResults();
+                    placeInput.value = '';
+                  },
+                }
+              );
+            m.on('click', () => {
+              map.setView([latitude, longitude], 14);
+              showDetails();
             });
             map.setView([latitude, longitude], 14);
-            m.openPopup();
+            showDetails();
           });
           resultsList.appendChild(li);
         });
@@ -1182,36 +1421,47 @@ export async function initTravelPanel() {
       const { lat, lon } = coords;
       const m = L.marker([lat, lon], { icon: resultIcon }).addTo(map);
       resultMarkers.push(m);
-      const popupDiv = document.createElement('div');
-      const title = document.createElement('div');
-      title.textContent = `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
-      const btn = document.createElement('button');
-      btn.textContent = 'Add to list';
-      const dir = document.createElement('a');
-      dir.href = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}`;
-      dir.target = '_blank';
-      dir.rel = 'noopener noreferrer';
-      dir.textContent = 'Directions';
-      dir.style.display = 'inline-block';
-      dir.style.marginTop = '4px';
-      popupDiv.append(title, btn, dir);
-      m.bindPopup(popupDiv);
-      btn.addEventListener('click', async () => {
-        const name = prompt('Place name:', '');
-        if (!name) return;
-        await storePlace({ name, description: '', lat, lon, tags: [], Rating: '', Date: '', visited: false });
-        clearSearchResults();
-        placeInput.value = '';
+      const showDetails = () =>
+        renderSearchResultDetails(
+          {
+            title: 'Searched location',
+            description: `Results for "${term}"`,
+            lat,
+            lon,
+          },
+          {
+            onAdd: async () => {
+              const name = prompt('Place name:', '') || '';
+              if (!name.trim()) return;
+              await storePlace({
+                name: name.trim(),
+                description: '',
+                lat,
+                lon,
+                tags: [],
+                Rating: '',
+                Date: '',
+                visited: false
+              });
+              clearSearchResults();
+              placeInput.value = '';
+            },
+          }
+        );
+      m.on('click', () => {
+        map.setView([lat, lon], 14);
+        showDetails();
       });
       const li = document.createElement('li');
-      li.textContent = title.textContent;
+      li.textContent = term;
       li.classList.add('search-result');
       li.addEventListener('click', () => {
         map.setView([lat, lon], 14);
-        m.openPopup();
+        showDetails();
       });
       if (resultsList) resultsList.append(li);
       map.setView([lat, lon], 14);
+      showDetails();
       return;
     }
     try {
@@ -1226,26 +1476,37 @@ export async function initTravelPanel() {
           latLngs.push([latitude, longitude]);
           const m = L.marker([latitude, longitude], { icon: resultIcon }).addTo(map);
           resultMarkers.push(m);
-          const popupDiv = document.createElement('div');
-          const title = document.createElement('div');
-          title.textContent = display_name;
-          const btn = document.createElement('button');
-          btn.textContent = 'Add to list';
-          const dir = document.createElement('a');
-          dir.href = `https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}`;
-          dir.target = '_blank';
-          dir.rel = 'noopener noreferrer';
-          dir.textContent = 'Directions';
-          dir.style.display = 'inline-block';
-          dir.style.marginTop = '4px';
-          popupDiv.append(title, btn, dir);
-          m.bindPopup(popupDiv);
-          btn.addEventListener('click', async () => {
-            const name = prompt('Place name:', display_name.split(',')[0]);
-            if (!name) return;
-            await storePlace({ name, description: '', lat: latitude, lon: longitude, tags: [], Rating: '', Date: '', visited: false });
-            clearSearchResults();
-            placeInput.value = '';
+          const showDetails = () =>
+            renderSearchResultDetails(
+              {
+                title: display_name.split(',')[0] || display_name,
+                description: display_name,
+                lat: latitude,
+                lon: longitude,
+              },
+              {
+                onAdd: async () => {
+                  const name =
+                    prompt('Place name:', display_name.split(',')[0] || display_name) || '';
+                  if (!name.trim()) return;
+                  await storePlace({
+                    name: name.trim(),
+                    description: '',
+                    lat: latitude,
+                    lon: longitude,
+                    tags: [],
+                    Rating: '',
+                    Date: '',
+                    visited: false
+                  });
+                  clearSearchResults();
+                  placeInput.value = '';
+                },
+              }
+            );
+          m.on('click', () => {
+            map.setView([latitude, longitude], 14);
+            showDetails();
           });
 
           const li = document.createElement('li');
@@ -1253,7 +1514,7 @@ export async function initTravelPanel() {
           li.classList.add('search-result');
           li.addEventListener('click', () => {
             map.setView([latitude, longitude], 14);
-            m.openPopup();
+            showDetails();
           });
           if (resultsList) resultsList.append(li);
         });
