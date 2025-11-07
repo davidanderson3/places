@@ -1439,7 +1439,8 @@ h2 {
 }
 
 #placeSearchRow input {
-  max-width: 260px;
+  flex: 1 1 auto;
+  max-width: none;
 }
 
 #placeSearchRow button {
@@ -1536,15 +1537,23 @@ h2 {
   margin: 0;
 }
 
+#placemarkList {
+  flex: 1 1 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid #ccc;
+  padding: 8px;
+  box-sizing: border-box;
+  background: #fff;
+  overflow: hidden;
+}
+
 #travelMap {
   flex: 1 1 100%;
   width: 100%;
   height: 300px;
   border: 1px solid #ccc;
-}
-
-#placemarkList {
-  display: none;
 }
 
 #placemarkDetails {
@@ -1562,10 +1571,66 @@ h2 {
   font-style: italic;
 }
 
+.placemark-overview__header {
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: #2f2f2f;
+}
+
+.placemark-overview {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.placemark-overview__item {
+  padding: 8px 10px;
+  border: 1px solid #d9d9d9;
+  border-radius: 4px;
+  background: #f8f8f8;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.placemark-overview__item:hover,
+.placemark-overview__item:focus-visible {
+  background: #eef4ff;
+  border-color: #9fb6ff;
+  outline: none;
+}
+
+.placemark-overview__item--active {
+  background: #f0f6ff;
+  border-color: #4285F4;
+}
+
+.placemark-overview__empty {
+  color: #666;
+  font-style: italic;
+}
+
 .placemark-details__title {
   font-size: 1.1rem;
   font-weight: 600;
   margin-bottom: 8px;
+}
+
+.placemark-details__back {
+  background: none;
+  border: none;
+  color: #0066cc;
+  cursor: pointer;
+  padding: 0;
+  margin: 0 0 8px;
+  font-size: 0.85rem;
+}
+
+.placemark-details__back:hover {
+  text-decoration: underline;
 }
 
 .placemark-details__description {
@@ -1608,10 +1673,14 @@ h2 {
 
 .placemark-details__actions {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
+  align-items: flex-start;
   gap: 8px;
-  align-items: center;
   margin-top: 12px;
+}
+
+.placemark-details__actions--search {
+  width: 100%;
 }
 
 .placemark-details__edit-btn {
@@ -1628,9 +1697,12 @@ h2 {
   background-color: #638b76;
 }
 
+
 .placemark-details__directions {
   color: #0066cc;
   text-decoration: none;
+  display: inline-block;
+  margin-top: 0;
 }
 
 .placemark-details__directions:hover {
@@ -1704,12 +1776,9 @@ h2 {
     flex-wrap: nowrap;
   }
   #placemarkList {
-    display: block;
-    flex: 0 0 200px;
-    max-width: 240px;
-    overflow-y: auto;
-    border: 1px solid #ccc;
-    padding: 4px;
+    flex: 0 0 260px;
+    max-width: 300px;
+    min-height: 0;
   }
   #travelMap {
     flex: 1 1 auto;
@@ -1722,10 +1791,6 @@ h2 {
   #travelTagFilters {
     margin-top: 16px;
   }
-}
-
-#placemarkList details {
-  margin-bottom: 4px;
 }
 
 #placeTags {
@@ -1977,22 +2042,24 @@ h2 {
 /* Place search results list */
 .search-results {
   list-style: none;
-  padding-left: 0;
-  margin: 8px 0;
-  max-height: 40vh;
+  padding: 0;
+  margin: 0;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
   background: #fff;
-  border: 1px solid #ccc;
+  border: 1px solid #d7d7d7;
+  border-radius: 4px;
 }
 
-.search-results li {
+.search-results li:not(.search-result-card) {
   padding: 4px 8px;
   cursor: pointer;
 }
 
-.search-results li:hover {
+.search-results li:not(.search-result-card):hover {
   background: #eee;
 }
 
@@ -2002,6 +2069,93 @@ h2 {
 
 #placeResults li.search-result {
   color: #4285F4;
+}
+
+.search-results__header {
+  padding: 6px 10px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #666;
+  background: #f3f3f3;
+  cursor: default;
+}
+
+.search-results__header:hover {
+  background: #f3f3f3;
+}
+
+.search-results__empty {
+  padding: 10px 12px;
+  color: #666;
+  cursor: default;
+  background: #fff;
+}
+
+.search-results__empty:hover {
+  background: #fff;
+}
+
+.search-result-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #e0e0e0;
+  background: #fff;
+  cursor: pointer;
+}
+
+.search-result-card:last-child {
+  border-bottom: none;
+}
+
+.search-result-card__title {
+  font-weight: 600;
+  color: #2f2f2f;
+}
+
+.search-result-card__subtitle {
+  font-size: 0.85rem;
+  color: #555;
+}
+
+.search-result-card__badge {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: #e8f4ec;
+  color: #3b7a59;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.search-result-card__actions {
+  width: 100%;
+  gap: 6px;
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.search-result-card:hover {
+  background: #f5f8fa;
+}
+
+.search-result-card--existing {
+  background: #f3f7f4;
+}
+
+.search-result-card--existing:hover {
+  background: #e8f1eb;
+}
+
+.search-result-card--active {
+  border-left: 4px solid #4285F4;
+  padding-left: 8px;
+  background: #f0f6ff;
 }
 
 /* Style the plus icon on the add-item button */

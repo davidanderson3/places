@@ -47,6 +47,8 @@ let activeMarker = null;
 let allTags = [];
 let selectedTags = [];
 let resultMarkers = [];
+let activeSearchResultCard = null;
+let showingSearchResultDetails = false;
 let sortByDistance = true;
 let sortKey = null; // one of: name, description, tags, Rating, Date, visited, distance
 let sortDir = 'asc'; // 'asc' | 'desc'
@@ -56,6 +58,7 @@ const pageSize = Infinity;
 let currentPage = 0;
 let placemarkListEl = null;
 let placemarkDetailsEl = null;
+let tableBody = null;
 let selectedPlaceRef = null;
 let detailsEditState = { place: null, editing: false };
 let savePlaceEdits = null;
@@ -71,6 +74,7 @@ function resizeTravelMap() {
   mapEl.style.height = `${height}px`;
   if (listEl) {
     listEl.style.maxHeight = `${height}px`;
+    listEl.style.height = `${height}px`;
   }
   if (detailsEl) {
     if (window.innerWidth >= 1024) {
@@ -122,6 +126,8 @@ const selectedIcon = L.icon({
   popupAnchor: [0, -14],
 });
 
+const NOMINATIM_RESULT_LIMIT = 15;
+
 function haversine(lat1, lon1, lat2, lon2) {
   const R = 3958.8; // miles
   const toRad = deg => (deg * Math.PI) / 180;
@@ -150,6 +156,7 @@ function applyVisitedFlag(place) {
 }
 
 function renderDetailsPlaceholder(message = 'Select a place to see details.') {
+  showingSearchResultDetails = false;
   if (!placemarkDetailsEl) return;
   placemarkDetailsEl.innerHTML = '';
   const placeholder = document.createElement('div');
@@ -158,7 +165,91 @@ function renderDetailsPlaceholder(message = 'Select a place to see details.') {
   placemarkDetailsEl.appendChild(placeholder);
 }
 
+function renderPlacemarkOverview() {
+  showingSearchResultDetails = false;
+  if (!placemarkDetailsEl) return;
+  placemarkDetailsEl.innerHTML = '';
+
+  const header = document.createElement('div');
+  header.className = 'placemark-overview__header';
+  header.textContent = 'Places in map view';
+  placemarkDetailsEl.appendChild(header);
+
+  const totalPlaces = travelData.length;
+  const activeMarkers = markers.filter(m => m && m.place);
+
+  if (activeMarkers.length === 0) {
+    const message = document.createElement('div');
+    message.className = 'placemark-overview__empty';
+    message.textContent =
+      totalPlaces === 0
+        ? 'No saved places yet. Use the search panel to add one.'
+        : 'No places match your current filters.';
+    placemarkDetailsEl.appendChild(message);
+    return;
+  }
+
+  let visibleMarkers = activeMarkers;
+  if (map && typeof map.getBounds === 'function') {
+    const bounds = map.getBounds();
+    visibleMarkers = activeMarkers.filter(marker => bounds.contains(marker.getLatLng()));
+  }
+
+  if (visibleMarkers.length === 0) {
+    const message = document.createElement('div');
+    message.className = 'placemark-overview__empty';
+    message.textContent = 'No places in the current map view. Pan or zoom to find more.';
+    placemarkDetailsEl.appendChild(message);
+    return;
+  }
+
+  visibleMarkers = visibleMarkers
+    .slice()
+    .sort((a, b) => (a.place.name || '').localeCompare(b.place.name || ''));
+
+  const list = document.createElement('ul');
+  list.className = 'placemark-overview';
+
+  visibleMarkers.forEach(marker => {
+    const place = marker.place;
+    const item = document.createElement('li');
+    item.className = 'placemark-overview__item';
+    if (selectedPlaceRef === place) {
+      item.classList.add('placemark-overview__item--active');
+    }
+    item.textContent = place.name || 'Untitled place';
+    item.tabIndex = 0;
+    const activate = () => {
+      const row =
+        tableBody &&
+        Array.from(tableBody.children || []).find(tr => tr.placeRef === place);
+      if (row) {
+        bringRowToTop(row);
+        return;
+      }
+      if (marker) {
+        setActiveMarker(marker, { panToMarker: true });
+        return;
+      }
+      selectedPlaceRef = place;
+      detailsEditState = { place, editing: false };
+      renderPlacemarkDetails(place);
+    };
+    item.addEventListener('click', activate);
+    item.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        activate();
+      }
+    });
+    list.appendChild(item);
+  });
+
+  placemarkDetailsEl.appendChild(list);
+}
+
 function renderSearchResultDetails(result, { onAdd } = {}) {
+    showingSearchResultDetails = true;
     if (!placemarkDetailsEl) return;
     selectedPlaceRef = null;
     detailsEditState = { place: null, editing: false };
@@ -177,7 +268,7 @@ function renderSearchResultDetails(result, { onAdd } = {}) {
     }
 
     const actions = document.createElement('div');
-    actions.className = 'placemark-details__actions';
+    actions.className = 'placemark-details__actions placemark-details__actions--search';
 
     if (typeof onAdd === 'function') {
       const addBtn = document.createElement('button');
@@ -203,15 +294,166 @@ function renderSearchResultDetails(result, { onAdd } = {}) {
     }
 }
 
+function highlightSearchResultCard(card) {
+  if (activeSearchResultCard && activeSearchResultCard !== card) {
+    activeSearchResultCard.classList.remove('search-result-card--active');
+  }
+  activeSearchResultCard = card || null;
+  if (activeSearchResultCard) {
+    activeSearchResultCard.classList.add('search-result-card--active');
+    try {
+      activeSearchResultCard.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    } catch {
+      // scrollIntoView may fail in older browsers; ignore
+    }
+  }
+}
+
+function createSearchResultListItem(
+  result,
+  {
+    onAdd,
+    onFocus,
+    variant = 'remote',
+  } = {}
+) {
+  const li = document.createElement('li');
+  li.className = 'search-result-card';
+  if (variant && variant !== 'remote') {
+    li.classList.add(`search-result-card--${variant}`);
+  }
+
+  const title = document.createElement('div');
+  title.className = 'search-result-card__title';
+  title.textContent = result.title || 'Search result';
+  li.append(title);
+
+  const subtitleText = result.subtitle || result.description;
+  if (subtitleText) {
+    const subtitle = document.createElement('div');
+    subtitle.className = 'search-result-card__subtitle';
+    subtitle.textContent = subtitleText;
+    li.append(subtitle);
+  }
+
+  if (variant === 'existing') {
+    const badge = document.createElement('span');
+    badge.className = 'search-result-card__badge';
+    badge.textContent = 'Already saved';
+    li.append(badge);
+  }
+
+  if (typeof onAdd === 'function' || (Number.isFinite(result.lat) && Number.isFinite(result.lon))) {
+    const actions = document.createElement('div');
+    actions.className = 'placemark-details__actions placemark-details__actions--search search-result-card__actions';
+
+    if (typeof onAdd === 'function') {
+      const addBtn = document.createElement('button');
+      addBtn.type = 'button';
+      addBtn.className = 'placemark-details__edit-btn';
+      addBtn.textContent = 'Add to my places';
+      addBtn.addEventListener('click', e => {
+        e.stopPropagation();
+        onAdd();
+      });
+      actions.append(addBtn);
+    }
+
+    if (Number.isFinite(result.lat) && Number.isFinite(result.lon)) {
+      const directionsLink = document.createElement('a');
+      directionsLink.className = 'placemark-details__directions';
+      directionsLink.href = `https://www.google.com/maps/dir/?api=1&destination=${result.lat},${result.lon}`;
+      directionsLink.target = '_blank';
+      directionsLink.rel = 'noopener noreferrer';
+      directionsLink.textContent = 'Get Directions';
+      directionsLink.addEventListener('click', e => {
+        e.stopPropagation();
+      });
+      actions.append(directionsLink);
+    }
+
+    if (actions.childElementCount > 0) {
+      li.append(actions);
+    }
+  }
+
+  li.addEventListener('click', e => {
+    if (e.target.closest('.placemark-details__edit-btn')) return;
+    if (e.target.closest('.placemark-details__directions')) return;
+    if (typeof onFocus === 'function') {
+      onFocus();
+    }
+  });
+
+  return li;
+}
+
+function highlightRow(row) {
+  if (selectedRow) selectedRow.classList.remove('selected-row');
+  selectedRow = row;
+  row?.classList.add('selected-row');
+}
+
+function setActiveMarker(marker, { panToMarker = false } = {}) {
+  if (!marker || !map) return;
+  if (activeMarker && activeMarker !== marker && typeof activeMarker.setIcon === 'function') {
+    activeMarker.setIcon(activeMarker.defaultIcon || defaultIcon);
+  }
+  activeMarker = marker;
+  if (typeof marker.setIcon === 'function') {
+    marker.setIcon(selectedIcon);
+  }
+  selectedPlaceRef = marker.place || null;
+  detailsEditState = { place: selectedPlaceRef, editing: false };
+  renderPlacemarkDetails(selectedPlaceRef);
+  if (panToMarker && typeof map.setView === 'function') {
+    const latLng =
+      typeof marker.getLatLng === 'function'
+        ? marker.getLatLng()
+        : marker.place
+        ? [marker.place.lat, marker.place.lon]
+        : null;
+    if (latLng) {
+      const currentZoom = typeof map.getZoom === 'function' ? map.getZoom() : 0;
+      const targetZoom = Math.max(currentZoom || 0, 14);
+      map.setView(latLng, targetZoom);
+    }
+  }
+}
+
+function bringRowToTop(row) {
+  if (!row || !tableBody) return;
+  tableBody.insertBefore(row, tableBody.firstChild);
+  highlightRow(row);
+  const marker = rowMarkerMap.get(row);
+  if (marker) {
+    setActiveMarker(marker, { panToMarker: true });
+  }
+}
+
 function renderPlacemarkDetails(place) {
+  showingSearchResultDetails = false;
   if (!placemarkDetailsEl) return;
   if (!place) {
-    renderDetailsPlaceholder();
+    renderPlacemarkOverview();
     return;
   }
 
   const editing = detailsEditState.editing && detailsEditState.place === place;
   placemarkDetailsEl.innerHTML = '';
+
+  if (!editing) {
+    const backBtn = document.createElement('button');
+    backBtn.type = 'button';
+    backBtn.className = 'placemark-details__back';
+    backBtn.textContent = '← Back to map places';
+    backBtn.addEventListener('click', () => {
+      selectedPlaceRef = null;
+      detailsEditState = { place: null, editing: false };
+      renderPlacemarkOverview();
+    });
+    placemarkDetailsEl.appendChild(backBtn);
+  }
 
   const title = document.createElement('div');
   title.className = 'placemark-details__title';
@@ -225,8 +467,10 @@ function renderPlacemarkDetails(place) {
     placemarkDetailsEl.appendChild(desc);
   }
 
-  if (Array.isArray(place.tags) && place.tags.length) {
-    const tagsSection = document.createElement('div');
+  const hasTags = Array.isArray(place.tags) && place.tags.length;
+  let tagsSection = null;
+  if (hasTags) {
+    tagsSection = document.createElement('div');
     tagsSection.className = 'placemark-details__tags';
     place.tags.forEach(tag => {
       const chip = document.createElement('span');
@@ -234,7 +478,6 @@ function renderPlacemarkDetails(place) {
       chip.textContent = tag;
       tagsSection.appendChild(chip);
     });
-    placemarkDetailsEl.appendChild(tagsSection);
   }
 
   const infoList = document.createElement('dl');
@@ -263,6 +506,10 @@ function renderPlacemarkDetails(place) {
 
   if (infoList.childElementCount) {
     placemarkDetailsEl.appendChild(infoList);
+  }
+
+  if (!editing && tagsSection) {
+    placemarkDetailsEl.appendChild(tagsSection);
   }
 
   let tagListId = null;
@@ -423,23 +670,15 @@ function renderPlacemarkDetails(place) {
 }
 
 function updateVisiblePlacemarkList() {
-  if (!placemarkListEl || !map) return;
-  placemarkListEl.innerHTML = '';
-  const bounds = map.getBounds();
-  markers.forEach(m => {
-    if (bounds.contains(m.getLatLng()) && m.place) {
-      const details = document.createElement('details');
-      const summary = document.createElement('summary');
-      summary.textContent = m.place.name || '';
-      details.appendChild(summary);
-      if (m.place.description) {
-        const desc = document.createElement('div');
-        desc.textContent = m.place.description;
-        details.appendChild(desc);
-      }
-      placemarkListEl.appendChild(details);
-    }
-  });
+  if (
+    !placemarkDetailsEl ||
+    showingSearchResultDetails ||
+    detailsEditState.editing ||
+    selectedPlaceRef
+  ) {
+    return;
+  }
+  renderPlacemarkOverview();
 }
 
 export async function initTravelPanel() {
@@ -453,7 +692,7 @@ export async function initTravelPanel() {
   mapInitialized = true;
 
   const mapEl = document.getElementById('travelMap');
-  const tableBody = document.querySelector('#travelTable tbody');
+  tableBody = document.querySelector('#travelTable tbody');
   const tableHeaders = Array.from(document.querySelectorAll('#travelTable thead th'));
   const headerKeys = ['name','description','tags','Rating','Date','visited','distance'];
   const headerBaseText = tableHeaders.map(th => th.textContent.trim());
@@ -674,51 +913,6 @@ export async function initTravelPanel() {
   // Recompute after initial render and on window resize
   setTimeout(updateTagScrollIndicators, 0);
   window.addEventListener('resize', () => setTimeout(updateTagScrollIndicators, 0));
-
-  // Highlight a table row without reordering
-  function highlightRow(row) {
-    if (selectedRow) selectedRow.classList.remove('selected-row');
-    selectedRow = row;
-    row.classList.add('selected-row');
-  }
-
-  function setActiveMarker(marker, { panToMarker = false } = {}) {
-    if (!marker || !map) return;
-    if (activeMarker && activeMarker !== marker && typeof activeMarker.setIcon === 'function') {
-      activeMarker.setIcon(activeMarker.defaultIcon || defaultIcon);
-    }
-    activeMarker = marker;
-    if (typeof marker.setIcon === 'function') {
-      marker.setIcon(selectedIcon);
-    }
-    selectedPlaceRef = marker.place || null;
-    detailsEditState = { place: selectedPlaceRef, editing: false };
-    renderPlacemarkDetails(selectedPlaceRef);
-    if (panToMarker && typeof map.setView === 'function') {
-      const latLng =
-        typeof marker.getLatLng === 'function'
-          ? marker.getLatLng()
-          : marker.place
-          ? [marker.place.lat, marker.place.lon]
-          : null;
-      if (latLng) {
-        const currentZoom = typeof map.getZoom === 'function' ? map.getZoom() : 0;
-        const targetZoom = Math.max(currentZoom || 0, 14);
-        map.setView(latLng, targetZoom);
-      }
-    }
-  }
-
-  // Helper: bring a table row to the top and highlight it
-  function bringRowToTop(row) {
-    if (!row || !tableBody) return;
-    tableBody.insertBefore(row, tableBody.firstChild);
-    highlightRow(row);
-    const marker = rowMarkerMap.get(row);
-    if (marker) {
-      setActiveMarker(marker, { panToMarker: true });
-    }
-  }
 
   function updatePagination(total) {
     if (!paginationDiv) return;
@@ -1106,99 +1300,18 @@ export async function initTravelPanel() {
       if (resultsList) resultsList.innerHTML = '';
       resultMarkers.forEach(m => m.remove());
       resultMarkers = [];
-    };
-    // Typeahead: suggest places while typing (no browser history suggestions)
-    let suggestAbort;
-    const debounce = (fn, wait = 300) => {
-      let t;
-      return (...args) => {
-        clearTimeout(t);
-        t = setTimeout(() => fn(...args), wait);
-      };
-    };
-    const suggestPlaces = async (q) => {
-      if (!resultsList) return;
-      if (!q || q.trim().length < 2) {
-        resultsList.innerHTML = '';
-        return;
-      }
-      // cancel previous in-flight request
-      if (suggestAbort) suggestAbort.abort();
-      suggestAbort = new AbortController();
-      const { signal } = suggestAbort;
-      try {
-        const url = `https://nominatim.openstreetmap.org/search?format=json&limit=5&q=${encodeURIComponent(q)}`;
-        const resp = await fetch(url, { signal });
-        if (!resp.ok) throw new Error('suggest fetch failed');
-        const data = await resp.json();
-        resultsList.innerHTML = '';
-        (data || []).forEach(res => {
-          const li = document.createElement('li');
-          li.textContent = res.display_name;
-          li.classList.add('search-result');
-          li.addEventListener('click', () => {
-            if (!placeInput) return;
-            placeInput.value = res.display_name;
-            clearSearchResults();
-            resultsList.innerHTML = '';
-            const latitude = parseFloat(res.lat);
-            const longitude = parseFloat(res.lon);
-            const m = L.marker([latitude, longitude], { icon: resultIcon }).addTo(map);
-            resultMarkers.push(m);
-            const showDetails = () =>
-              renderSearchResultDetails(
-                {
-                  title: res.display_name.split(',')[0] || res.display_name,
-                  description: res.display_name,
-                  lat: latitude,
-                  lon: longitude,
-                },
-                {
-                  onAdd: async () => {
-                    const name =
-                      prompt('Place name:', res.display_name.split(',')[0] || res.display_name) || '';
-                    if (!name.trim()) return;
-                    await storePlace({
-                      name: name.trim(),
-                      description: '',
-                      lat: latitude,
-                      lon: longitude,
-                      tags: [],
-                      Rating: '',
-                      Date: '',
-                      visited: false
-                    });
-                    clearSearchResults();
-                    placeInput.value = '';
-                  },
-                }
-              );
-            m.on('click', () => {
-              map.setView([latitude, longitude], 14);
-              showDetails();
-            });
-            map.setView([latitude, longitude], 14);
-            showDetails();
-          });
-          resultsList.appendChild(li);
-        });
-        if (resultsList.children.length === 0) {
-          const li = document.createElement('li');
-          li.textContent = 'No suggestions';
-          resultsList.appendChild(li);
-        }
-      } catch (err) {
-        if (err.name !== 'AbortError') {
-          // silent fail for suggestions
-          // console.error('suggest error', err);
-        }
+      highlightSearchResultCard(null);
+      showingSearchResultDetails = false;
+      if (!selectedPlaceRef && !detailsEditState.editing) {
+        renderPlacemarkOverview();
       }
     };
     placeInput?.setAttribute('autocomplete', 'off');
-    placeInput?.addEventListener('input', debounce(e => {
-      const val = e.target.value;
-      suggestPlaces(val);
-    }, 250));
+    placeInput?.addEventListener('input', e => {
+      if (!e.target.value.trim()) {
+        clearSearchResults();
+      }
+    });
     // Clear button removed from UI; keep internal helper for programmatic clears only
 
     async function flushPendingOperations() {
@@ -1397,31 +1510,95 @@ export async function initTravelPanel() {
     const term = placeInput.value.trim();
     if (!term) return;
     clearSearchResults();
+
+    const appendSectionHeader = text => {
+      if (!resultsList) return;
+      const header = document.createElement('li');
+      header.className = 'search-results__header';
+      header.textContent = text;
+      resultsList.append(header);
+    };
+
+    const normalizedTerm = term.toLowerCase();
     const existingMatches = travelData.filter(p =>
-      p.name.toLowerCase().includes(term.toLowerCase())
+      p.name.toLowerCase().includes(normalizedTerm)
     );
+
+    if (existingMatches.length) {
+      appendSectionHeader('Saved places');
+    }
+
     existingMatches.forEach(p => {
-      const li = document.createElement('li');
-      li.textContent = p.name;
-      li.classList.add('existing-place');
-      li.addEventListener('click', () => {
-        const marker = p.marker;
-        if (marker) {
-          setActiveMarker(marker, { panToMarker: true });
-          const row = markerRowMap.get(marker);
-          if (row) highlightRow(row);
-        } else {
-          map.setView([p.lat, p.lon], 14);
-        }
-      });
-      resultsList?.append(li);
+      let card;
+      const config = {
+        variant: 'existing',
+        onFocus: () => {
+          const marker = p.marker;
+          if (marker) {
+            const row = markerRowMap.get(marker);
+            if (row) {
+              bringRowToTop(row);
+            } else {
+              setActiveMarker(marker, { panToMarker: true });
+            }
+          } else {
+            map.setView([p.lat, p.lon], 14);
+            renderPlacemarkDetails(p);
+          }
+          highlightSearchResultCard(card);
+        },
+      };
+      card = createSearchResultListItem(
+        {
+          title: p.name || 'Untitled place',
+          subtitle: p.description || '',
+          lat: p.lat,
+          lon: p.lon,
+        },
+        config
+      );
+      resultsList?.append(card);
     });
+
     const coords = parseCoordinates(term);
     if (coords) {
       const { lat, lon } = coords;
-      const m = L.marker([lat, lon], { icon: resultIcon }).addTo(map);
-      resultMarkers.push(m);
-      const showDetails = () =>
+      let card;
+      let marker;
+      const handleAdd = async () => {
+        const name = prompt('Place name:', '') || '';
+        if (!name.trim()) return;
+        await storePlace({
+          name: name.trim(),
+          description: '',
+          lat,
+          lon,
+          tags: [],
+          Rating: '',
+          Date: '',
+          visited: false
+        });
+        clearSearchResults();
+        placeInput.value = '';
+      };
+      const config = {
+        onAdd: handleAdd,
+        onFocus: () => {
+          map.setView([lat, lon], 14);
+          showDetails();
+        },
+      };
+      card = createSearchResultListItem(
+        {
+          title: 'Searched location',
+          subtitle: `Results for "${term}"`,
+          lat,
+          lon,
+        },
+        config
+      );
+      resultsList?.append(card);
+      const showDetails = () => {
         renderSearchResultDetails(
           {
             title: 'Searched location',
@@ -1429,105 +1606,103 @@ export async function initTravelPanel() {
             lat,
             lon,
           },
-          {
-            onAdd: async () => {
-              const name = prompt('Place name:', '') || '';
-              if (!name.trim()) return;
-              await storePlace({
-                name: name.trim(),
-                description: '',
-                lat,
-                lon,
-                tags: [],
-                Rating: '',
-                Date: '',
-                visited: false
-              });
-              clearSearchResults();
-              placeInput.value = '';
-            },
-          }
+          { onAdd: handleAdd }
         );
-      m.on('click', () => {
+        highlightSearchResultCard(card);
+      };
+      marker = L.marker([lat, lon], { icon: resultIcon }).addTo(map);
+      resultMarkers.push(marker);
+      marker.on('click', () => {
         map.setView([lat, lon], 14);
         showDetails();
       });
-      const li = document.createElement('li');
-      li.textContent = term;
-      li.classList.add('search-result');
-      li.addEventListener('click', () => {
-        map.setView([lat, lon], 14);
-        showDetails();
-      });
-      if (resultsList) resultsList.append(li);
       map.setView([lat, lon], 14);
       showDetails();
       return;
     }
+
     try {
-      const resp = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=5&q=${encodeURIComponent(term)}`);
+      const resp = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=${NOMINATIM_RESULT_LIMIT}&q=${encodeURIComponent(term)}`);
+      if (!resp.ok) throw new Error('Search request failed');
       const data = await resp.json();
-      if (data && data.length) {
+      if (Array.isArray(data) && data.length) {
+        appendSectionHeader(existingMatches.length ? 'Other results' : 'Search results');
         const latLngs = [];
         data.forEach(res => {
           const { lat, lon, display_name } = res;
           const latitude = parseFloat(lat);
           const longitude = parseFloat(lon);
+          if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
           latLngs.push([latitude, longitude]);
-          const m = L.marker([latitude, longitude], { icon: resultIcon }).addTo(map);
-          resultMarkers.push(m);
-          const showDetails = () =>
+          let card;
+          const placeSummary = {
+            title: display_name.split(',')[0] || display_name,
+            subtitle: display_name,
+            lat: latitude,
+            lon: longitude,
+          };
+          const handleAdd = async () => {
+            const name =
+              prompt('Place name:', placeSummary.title) || '';
+            if (!name.trim()) return;
+            await storePlace({
+              name: name.trim(),
+              description: '',
+              lat: latitude,
+              lon: longitude,
+              tags: [],
+              Rating: '',
+              Date: '',
+              visited: false
+            });
+            clearSearchResults();
+            placeInput.value = '';
+          };
+          const config = {
+            onAdd: handleAdd,
+            onFocus: () => {
+              map.setView([latitude, longitude], 14);
+              showDetails();
+            },
+          };
+          card = createSearchResultListItem(placeSummary, config);
+          resultsList?.append(card);
+          const showDetails = () => {
             renderSearchResultDetails(
               {
-                title: display_name.split(',')[0] || display_name,
-                description: display_name,
+                title: placeSummary.title,
+                description: placeSummary.subtitle,
                 lat: latitude,
                 lon: longitude,
               },
-              {
-                onAdd: async () => {
-                  const name =
-                    prompt('Place name:', display_name.split(',')[0] || display_name) || '';
-                  if (!name.trim()) return;
-                  await storePlace({
-                    name: name.trim(),
-                    description: '',
-                    lat: latitude,
-                    lon: longitude,
-                    tags: [],
-                    Rating: '',
-                    Date: '',
-                    visited: false
-                  });
-                  clearSearchResults();
-                  placeInput.value = '';
-                },
-              }
+              { onAdd: handleAdd }
             );
-          m.on('click', () => {
+            highlightSearchResultCard(card);
+          };
+          const marker = L.marker([latitude, longitude], { icon: resultIcon }).addTo(map);
+          resultMarkers.push(marker);
+          marker.on('click', () => {
             map.setView([latitude, longitude], 14);
             showDetails();
           });
-
-          const li = document.createElement('li');
-          li.textContent = display_name;
-          li.classList.add('search-result');
-          li.addEventListener('click', () => {
-            map.setView([latitude, longitude], 14);
-            showDetails();
-          });
-          if (resultsList) resultsList.append(li);
         });
         if (latLngs.length === 1) {
           map.setView(latLngs[0], 14);
-        } else {
+        } else if (latLngs.length > 1) {
           map.fitBounds(latLngs);
         }
-      } else {
-        alert('Place not found');
+      } else if (!existingMatches.length) {
+        const li = document.createElement('li');
+        li.className = 'search-results__empty';
+        li.textContent = `No results for "${term}".`;
+        resultsList?.append(li);
       }
     } catch (err) {
       console.error('Error searching place', err);
+      const li = document.createElement('li');
+      li.className = 'search-results__empty';
+      li.textContent = 'Search failed. Please try again.';
+      resultsList?.append(li);
     }
   };
 

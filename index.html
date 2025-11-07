@@ -29,14 +29,14 @@
 
     <div id="travelPanel" class="main-layout">
       <div class="full-column">
-        <div id="placeSearchRow">
-          <input id="placeSearch" type="text" placeholder="Search all places or coordinates..." autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" name="place-search" enterkeyhint="search">
-          <button type="button" id="placeSearchBtn">Search</button>
-        </div>
-        <ul id="placeResults" class="search-results"></ul>
-        
         <div id="travelMapWrapper">
-          <div id="placemarkList"></div>
+          <div id="placemarkList">
+            <div id="placeSearchRow">
+              <input id="placeSearch" type="text" placeholder="Search" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" name="place-search" enterkeyhint="search">
+              <button type="button" id="placeSearchBtn">Search</button>
+            </div>
+            <ul id="placeResults" class="search-results"></ul>
+          </div>
           <div id="travelMap"></div>
           <div id="placemarkDetails">
             <div class="placemark-details-placeholder">Select a place to see details.</div>
