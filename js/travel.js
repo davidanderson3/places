@@ -6,6 +6,13 @@ import {
 } from './travelUtils.js';
 
 const BASE_KEY = 'travelData';
+const HIDDEN_SEARCH_RESULTS_KEY = 'travelHiddenSearchResults';
+const QUICK_SEARCHES_KEY = 'travelQuickSearches';
+const DEFAULT_QUICK_SEARCHES = ['Restaurants', 'Movie Theaters', 'Parks'];
+const WIKIPEDIA_SUMMARY_ENDPOINT =
+  'https://en.wikipedia.org/api/rest_v1/page/summary/';
+const WIKIPEDIA_SEARCH_ENDPOINT =
+  'https://en.wikipedia.org/w/api.php?action=opensearch&limit=1&format=json&origin=*';
 
 function storageKeyForUser(uid) {
   return uid ? `${BASE_KEY}-${uid}` : BASE_KEY;
@@ -14,6 +21,255 @@ function storageKeyForUser(uid) {
 function storageKey() {
   const user = getCurrentUser?.();
   return storageKeyForUser(user?.uid);
+}
+
+let hiddenSearchResultKeys = new Set();
+let activeContextRefresh = null;
+let summaryRequestCounter = 0;
+const summaryCache = new Map();
+let quickSearchTerms = [];
+function loadHiddenSearchResults() {
+  if (typeof localStorage === 'undefined') {
+    hiddenSearchResultKeys = new Set();
+    return;
+  }
+  try {
+    const stored = localStorage.getItem(HIDDEN_SEARCH_RESULTS_KEY);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      if (Array.isArray(parsed)) {
+        hiddenSearchResultKeys = new Set(parsed);
+        return;
+      }
+    }
+  } catch {
+    // ignore
+  }
+  hiddenSearchResultKeys = new Set();
+}
+
+function persistHiddenSearchResults() {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(
+      HIDDEN_SEARCH_RESULTS_KEY,
+      JSON.stringify(Array.from(hiddenSearchResultKeys))
+    );
+  } catch {
+    // ignore storage failures
+  }
+}
+
+function isSearchResultHidden(key) {
+  return key ? hiddenSearchResultKeys.has(key) : false;
+}
+
+function markSearchResultHidden(key) {
+  if (!key) return;
+  hiddenSearchResultKeys.add(key);
+  persistHiddenSearchResults();
+}
+
+function buildHiddenResultKey({ remoteId, lat, lon, title }) {
+  if (remoteId) return `id:${remoteId}`;
+  const latPart = Number(lat);
+  const lonPart = Number(lon);
+  const safeLat = Number.isFinite(latPart) ? latPart.toFixed(5) : 'nan';
+  const safeLon = Number.isFinite(lonPart) ? lonPart.toFixed(5) : 'nan';
+  const safeTitle = (title || '').toLowerCase().trim();
+  return `coord:${safeLat}:${safeLon}:${safeTitle}`;
+}
+
+loadHiddenSearchResults();
+
+const normalizeQuickSearchTerm = term =>
+  (term || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+function isDefaultQuickSearch(term) {
+  if (!term) return false;
+  const normalized = term.toLowerCase();
+  return DEFAULT_QUICK_SEARCHES.some(defaultTerm => defaultTerm.toLowerCase() === normalized);
+}
+
+function loadQuickSearchTerms() {
+  if (typeof localStorage === 'undefined') {
+    quickSearchTerms = DEFAULT_QUICK_SEARCHES.slice();
+    return;
+  }
+  try {
+    const stored = localStorage.getItem(QUICK_SEARCHES_KEY);
+    let combined = DEFAULT_QUICK_SEARCHES.slice();
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      if (Array.isArray(parsed)) {
+        combined = combined.concat(parsed);
+      }
+    }
+    const seen = new Set();
+    quickSearchTerms = combined
+      .map(normalizeQuickSearchTerm)
+      .filter(Boolean)
+      .filter(term => {
+        const key = term.toLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+  } catch {
+    quickSearchTerms = DEFAULT_QUICK_SEARCHES.slice();
+  }
+}
+
+function persistQuickSearchTerms() {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    const customTerms = quickSearchTerms.filter(term => !isDefaultQuickSearch(term));
+    localStorage.setItem(QUICK_SEARCHES_KEY, JSON.stringify(customTerms));
+  } catch {
+    // ignore persistence failures
+  }
+}
+
+function addQuickSearchTerm(term) {
+  const normalized = normalizeQuickSearchTerm(term);
+  if (!normalized) return false;
+  const exists = quickSearchTerms.some(t => t.toLowerCase() === normalized.toLowerCase());
+  if (exists) return false;
+  quickSearchTerms.push(normalized);
+  persistQuickSearchTerms();
+  return true;
+}
+
+function removeQuickSearchTerm(term) {
+  if (!term || isDefaultQuickSearch(term)) return false;
+  const normalized = term.toLowerCase();
+  const nextTerms = quickSearchTerms.filter(t => t.toLowerCase() !== normalized);
+  if (nextTerms.length === quickSearchTerms.length) return false;
+  quickSearchTerms = nextTerms;
+  persistQuickSearchTerms();
+  return true;
+}
+
+loadQuickSearchTerms();
+
+function buildSummaryQueries(title, subtitle = '') {
+  const clean = val =>
+    (val || '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  const queries = [];
+  const baseTitle = clean(title);
+  if (baseTitle) queries.push(baseTitle);
+  const subtitleFirstChunk = clean(subtitle.split(',')[0]);
+  if (baseTitle && subtitleFirstChunk) {
+    queries.push(`${baseTitle} ${subtitleFirstChunk}`);
+  }
+  if (subtitle) {
+    queries.push(clean(subtitle));
+  }
+  return Array.from(new Set(queries.filter(Boolean)));
+}
+
+async function searchWikipediaTitle(term) {
+  const resp = await fetch(`${WIKIPEDIA_SEARCH_ENDPOINT}&search=${encodeURIComponent(term)}`);
+  if (!resp.ok) {
+    throw new Error('Search request failed');
+  }
+  const data = await resp.json();
+  if (Array.isArray(data) && data.length >= 2 && Array.isArray(data[1]) && data[1].length) {
+    return data[1][0];
+  }
+  return null;
+}
+
+async function fetchWikipediaSummary(term, visited = new Set()) {
+  const normalizedKey = term.toLowerCase();
+  if (visited.has(normalizedKey)) return null;
+  visited.add(normalizedKey);
+  const summaryUrl = `${WIKIPEDIA_SUMMARY_ENDPOINT}${encodeURIComponent(term)}`;
+  const resp = await fetch(summaryUrl, {
+    headers: { Accept: 'application/json' }
+  });
+  if (resp.status === 404) {
+    const alternate = await searchWikipediaTitle(term);
+    if (alternate && alternate.toLowerCase() !== normalizedKey) {
+      return fetchWikipediaSummary(alternate, visited);
+    }
+    throw new Error(`No summary found for ${term}`);
+  }
+  if (!resp.ok) {
+    throw new Error(`Summary request failed for ${term}`);
+  }
+  const data = await resp.json();
+  if (!data?.extract) {
+    throw new Error('No extract returned');
+  }
+  return {
+    text: data.extract,
+    url:
+      data.content_urls?.desktop?.page ||
+      data.content_urls?.mobile?.page ||
+      data?.extract_html
+  };
+}
+
+async function fetchSummaryFromCandidates(candidates) {
+  for (const candidate of candidates) {
+    const key = candidate.toLowerCase();
+    if (summaryCache.has(key)) {
+      const cached = summaryCache.get(key);
+      if (cached) return cached;
+      continue;
+    }
+    try {
+      const summary = await fetchWikipediaSummary(candidate);
+      summaryCache.set(key, summary);
+      return summary;
+    } catch (err) {
+      summaryCache.set(key, null);
+      console.warn('Summary lookup failed for', candidate, err);
+    }
+  }
+  return null;
+}
+
+function renderSummaryIntoElement(el, { title, subtitle }) {
+  if (!el) return;
+  const requestId = ++summaryRequestCounter;
+  el.dataset.summaryRequestId = String(requestId);
+  el.textContent = 'Generating summary…';
+  const candidates = buildSummaryQueries(title, subtitle);
+  if (!candidates.length) {
+    el.textContent = 'No summary available.';
+    return;
+  }
+  fetchSummaryFromCandidates(candidates)
+    .then(summary => {
+      if (el.dataset.summaryRequestId !== String(requestId)) return;
+      if (!summary?.text) {
+        el.textContent = 'No summary available.';
+        return;
+      }
+      el.innerHTML = '';
+      const copy = document.createElement('p');
+      copy.textContent = summary.text;
+      el.appendChild(copy);
+      if (summary.url) {
+        const link = document.createElement('a');
+        link.href = summary.url;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.textContent = 'Read more on Wikipedia';
+        link.className = 'placemark-summary__link';
+        el.appendChild(link);
+      }
+    })
+    .catch(() => {
+      if (el.dataset.summaryRequestId !== String(requestId)) return;
+      el.textContent = 'No summary available.';
+    });
 }
 
 let lastUserId = null;
@@ -86,7 +342,11 @@ function resizeTravelMap() {
   if (map) {
     map.invalidateSize();
   }
-  updateVisiblePlacemarkList();
+  if (activeContextRefresh) {
+    activeContextRefresh();
+  } else {
+    updateVisiblePlacemarkList();
+  }
 }
 
 window.addEventListener('resize', resizeTravelMap);
@@ -117,6 +377,7 @@ const resultIcon = L.icon({
   iconSize: [24, 24],
   iconAnchor: [12, 12],
   popupAnchor: [0, -12],
+  className: 'travel-search-result-icon'
 });
 
 const selectedIcon = L.icon({
@@ -125,6 +386,27 @@ const selectedIcon = L.icon({
   iconAnchor: [14, 14],
   popupAnchor: [0, -14],
 });
+
+const USER_HOME_ZOOM = 12;
+
+function setContextRefresh(fn) {
+  activeContextRefresh = typeof fn === 'function' ? fn : null;
+}
+
+function handleMapMove() {
+  if (activeContextRefresh) {
+    activeContextRefresh();
+  } else {
+    updateVisiblePlacemarkList();
+  }
+}
+
+function focusMapNearUser() {
+  if (!map || !Array.isArray(userCoords)) return;
+  const [lat, lon] = userCoords;
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+  map.setView([lat, lon], USER_HOME_ZOOM);
+}
 
 const NOMINATIM_RESULT_LIMIT = 15;
 
@@ -155,6 +437,19 @@ function applyVisitedFlag(place) {
   }
 }
 
+function buildPlaceLocationHint(place) {
+  if (!place) return '';
+  const parts = [];
+  if (place.description) parts.push(place.description);
+  if (Array.isArray(place.tags) && place.tags.length) {
+    parts.push(place.tags.join(', '));
+  }
+  if (Number.isFinite(place.lat) && Number.isFinite(place.lon)) {
+    parts.push(`${place.lat}, ${place.lon}`);
+  }
+  return parts.join(' • ');
+}
+
 function renderDetailsPlaceholder(message = 'Select a place to see details.') {
   showingSearchResultDetails = false;
   if (!placemarkDetailsEl) return;
@@ -165,51 +460,41 @@ function renderDetailsPlaceholder(message = 'Select a place to see details.') {
   placemarkDetailsEl.appendChild(placeholder);
 }
 
-function renderPlacemarkOverview() {
-  showingSearchResultDetails = false;
-  if (!placemarkDetailsEl) return;
-  placemarkDetailsEl.innerHTML = '';
-
-  const header = document.createElement('div');
-  header.className = 'placemark-overview__header';
-  header.textContent = 'Places in map view';
-  placemarkDetailsEl.appendChild(header);
-
+function getVisibleMarkersSnapshot() {
   const totalPlaces = travelData.length;
   const activeMarkers = markers.filter(m => m && m.place);
-
-  if (activeMarkers.length === 0) {
-    const message = document.createElement('div');
-    message.className = 'placemark-overview__empty';
-    message.textContent =
-      totalPlaces === 0
-        ? 'No saved places yet. Use the search panel to add one.'
-        : 'No places match your current filters.';
-    placemarkDetailsEl.appendChild(message);
-    return;
-  }
-
   let visibleMarkers = activeMarkers;
   if (map && typeof map.getBounds === 'function') {
     const bounds = map.getBounds();
     visibleMarkers = activeMarkers.filter(marker => bounds.contains(marker.getLatLng()));
   }
+  const canUseProximitySort =
+    Array.isArray(userCoords) &&
+    Number.isFinite(userCoords[0]) &&
+    Number.isFinite(userCoords[1]);
+  visibleMarkers = visibleMarkers.slice().sort((a, b) => {
+    const hasCoords = marker =>
+      marker?.place &&
+      Number.isFinite(marker.place.lat) &&
+      Number.isFinite(marker.place.lon);
+    if (canUseProximitySort && hasCoords(a) && hasCoords(b)) {
+      const distA = haversine(userCoords[0], userCoords[1], a.place.lat, a.place.lon);
+      const distB = haversine(userCoords[0], userCoords[1], b.place.lat, b.place.lon);
+      if (Number.isFinite(distA) && Number.isFinite(distB)) {
+        if (Math.abs(distA - distB) < 1e-6) {
+          return (a.place.name || '').localeCompare(b.place.name || '');
+        }
+        return distA - distB;
+      }
+    }
+    return (a.place.name || '').localeCompare(b.place.name || '');
+  });
+  return { totalPlaces, activeMarkers, visibleMarkers };
+}
 
-  if (visibleMarkers.length === 0) {
-    const message = document.createElement('div');
-    message.className = 'placemark-overview__empty';
-    message.textContent = 'No places in the current map view. Pan or zoom to find more.';
-    placemarkDetailsEl.appendChild(message);
-    return;
-  }
-
-  visibleMarkers = visibleMarkers
-    .slice()
-    .sort((a, b) => (a.place.name || '').localeCompare(b.place.name || ''));
-
+function createVisibleMarkersList(visibleMarkers) {
   const list = document.createElement('ul');
   list.className = 'placemark-overview';
-
   visibleMarkers.forEach(marker => {
     const place = marker.place;
     const item = document.createElement('li');
@@ -244,8 +529,67 @@ function renderPlacemarkOverview() {
     });
     list.appendChild(item);
   });
+  return list;
+}
 
-  placemarkDetailsEl.appendChild(list);
+function renderContextSection(parent, { emptyMessage } = {}) {
+  const section = document.createElement('div');
+  section.className = 'placemark-search-context';
+  parent.appendChild(section);
+  const updateSection = () => {
+    section.innerHTML = '';
+    const header = document.createElement('div');
+    header.className = 'placemark-overview__header';
+    header.textContent = 'Other places in this map view';
+    section.appendChild(header);
+    const { visibleMarkers } = getVisibleMarkersSnapshot();
+    if (visibleMarkers.length) {
+      section.appendChild(createVisibleMarkersList(visibleMarkers));
+    } else {
+      const empty = document.createElement('div');
+      empty.className = 'placemark-overview__empty';
+      empty.textContent = emptyMessage || 'No places in the current map view.';
+      section.appendChild(empty);
+    }
+  };
+  updateSection();
+  setContextRefresh(updateSection);
+  return section;
+}
+
+function renderPlacemarkOverview() {
+  showingSearchResultDetails = false;
+  if (!placemarkDetailsEl) return;
+  placemarkDetailsEl.innerHTML = '';
+  setContextRefresh(null);
+
+  const header = document.createElement('div');
+  header.className = 'placemark-overview__header';
+  header.textContent = 'Places in map view';
+  placemarkDetailsEl.appendChild(header);
+
+  const { totalPlaces, activeMarkers, visibleMarkers } = getVisibleMarkersSnapshot();
+
+  if (activeMarkers.length === 0) {
+    const message = document.createElement('div');
+    message.className = 'placemark-overview__empty';
+    message.textContent =
+      totalPlaces === 0
+        ? 'No saved places yet. Use the search panel to add one.'
+        : 'No places match your current filters.';
+    placemarkDetailsEl.appendChild(message);
+    return;
+  }
+
+  if (visibleMarkers.length === 0) {
+    const message = document.createElement('div');
+    message.className = 'placemark-overview__empty';
+    message.textContent = 'No places in the current map view. Pan or zoom to find more.';
+    placemarkDetailsEl.appendChild(message);
+    return;
+  }
+
+  placemarkDetailsEl.appendChild(createVisibleMarkersList(visibleMarkers));
 }
 
 function renderSearchResultDetails(result, { onAdd } = {}) {
@@ -279,19 +623,21 @@ function renderSearchResultDetails(result, { onAdd } = {}) {
       actions.append(addBtn);
     }
 
-    if (Number.isFinite(result.lat) && Number.isFinite(result.lon)) {
-      const directionsLink = document.createElement('a');
-      directionsLink.className = 'placemark-details__directions';
-      directionsLink.href = `https://www.google.com/maps/dir/?api=1&destination=${result.lat},${result.lon}`;
-      directionsLink.target = '_blank';
-      directionsLink.rel = 'noopener noreferrer';
-      directionsLink.textContent = 'Get Directions';
-      actions.append(directionsLink);
-    }
+    const summarySection = document.createElement('div');
+    summarySection.className = 'placemark-summary';
+    placemarkDetailsEl.appendChild(summarySection);
+    renderSummaryIntoElement(summarySection, {
+      title: result.title || '',
+      subtitle: result.description || result.subtitle || ''
+    });
 
     if (actions.childElementCount > 0) {
       placemarkDetailsEl.appendChild(actions);
     }
+
+    renderContextSection(placemarkDetailsEl, {
+      emptyMessage: 'No saved places are currently visible.'
+    });
 }
 
 function highlightSearchResultCard(card) {
@@ -314,6 +660,7 @@ function createSearchResultListItem(
   {
     onAdd,
     onFocus,
+    onDismiss,
     variant = 'remote',
   } = {}
 ) {
@@ -336,6 +683,20 @@ function createSearchResultListItem(
     li.append(subtitle);
   }
 
+  if (typeof onDismiss === 'function') {
+    li.classList.add('search-result-card--dismissable');
+    const dismissBtn = document.createElement('button');
+    dismissBtn.type = 'button';
+    dismissBtn.className = 'search-result-card__dismiss';
+    dismissBtn.setAttribute('aria-label', 'Hide this result');
+    dismissBtn.textContent = '×';
+    dismissBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      onDismiss();
+    });
+    li.append(dismissBtn);
+  }
+
   if (variant === 'existing') {
     const badge = document.createElement('span');
     badge.className = 'search-result-card__badge';
@@ -343,38 +704,19 @@ function createSearchResultListItem(
     li.append(badge);
   }
 
-  if (typeof onAdd === 'function' || (Number.isFinite(result.lat) && Number.isFinite(result.lon))) {
+  if (typeof onAdd === 'function') {
     const actions = document.createElement('div');
     actions.className = 'placemark-details__actions placemark-details__actions--search search-result-card__actions';
-
-    if (typeof onAdd === 'function') {
-      const addBtn = document.createElement('button');
-      addBtn.type = 'button';
-      addBtn.className = 'placemark-details__edit-btn';
-      addBtn.textContent = 'Add to my places';
-      addBtn.addEventListener('click', e => {
-        e.stopPropagation();
-        onAdd();
-      });
-      actions.append(addBtn);
-    }
-
-    if (Number.isFinite(result.lat) && Number.isFinite(result.lon)) {
-      const directionsLink = document.createElement('a');
-      directionsLink.className = 'placemark-details__directions';
-      directionsLink.href = `https://www.google.com/maps/dir/?api=1&destination=${result.lat},${result.lon}`;
-      directionsLink.target = '_blank';
-      directionsLink.rel = 'noopener noreferrer';
-      directionsLink.textContent = 'Get Directions';
-      directionsLink.addEventListener('click', e => {
-        e.stopPropagation();
-      });
-      actions.append(directionsLink);
-    }
-
-    if (actions.childElementCount > 0) {
-      li.append(actions);
-    }
+    const addBtn = document.createElement('button');
+    addBtn.type = 'button';
+    addBtn.className = 'placemark-details__edit-btn';
+    addBtn.textContent = 'Add to my places';
+    addBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      onAdd();
+    });
+    actions.append(addBtn);
+    li.append(actions);
   }
 
   li.addEventListener('click', e => {
@@ -442,19 +784,6 @@ function renderPlacemarkDetails(place) {
   const editing = detailsEditState.editing && detailsEditState.place === place;
   placemarkDetailsEl.innerHTML = '';
 
-  if (!editing) {
-    const backBtn = document.createElement('button');
-    backBtn.type = 'button';
-    backBtn.className = 'placemark-details__back';
-    backBtn.textContent = '← Back to map places';
-    backBtn.addEventListener('click', () => {
-      selectedPlaceRef = null;
-      detailsEditState = { place: null, editing: false };
-      renderPlacemarkOverview();
-    });
-    placemarkDetailsEl.appendChild(backBtn);
-  }
-
   const title = document.createElement('div');
   title.className = 'placemark-details__title';
   title.textContent = place.name || 'Untitled place';
@@ -494,7 +823,41 @@ function renderPlacemarkDetails(place) {
 
   addInfoRow('Rating', place.Rating);
   addInfoRow('Date', place.Date);
-  addInfoRow('Visited', place.visited ? 'Yes' : 'No');
+
+  let visitedToggleEl = null;
+  if (!editing) {
+    visitedToggleEl = document.createElement('label');
+    visitedToggleEl.className = 'placemark-details__visited-toggle';
+    const visitedCheckbox = document.createElement('input');
+    visitedCheckbox.type = 'checkbox';
+    visitedCheckbox.checked = !!place.visited;
+    visitedCheckbox.title = 'Visited';
+    visitedCheckbox.setAttribute('aria-label', 'Visited');
+    const visitedText = document.createElement('span');
+    visitedText.textContent = 'Visited';
+    visitedToggleEl.append(visitedCheckbox, visitedText);
+    let updatingVisited = false;
+    visitedCheckbox.addEventListener('change', async () => {
+      if (updatingVisited) return;
+      if (typeof savePlaceEdits !== 'function') {
+        console.warn('Visited toggle unavailable until data sync is ready.');
+        visitedCheckbox.checked = !visitedCheckbox.checked;
+        return;
+      }
+      updatingVisited = true;
+      visitedCheckbox.disabled = true;
+      const nextVisited = visitedCheckbox.checked;
+      try {
+        await savePlaceEdits(place, { visited: nextVisited });
+      } catch (err) {
+        console.error('Failed to update visited state', err);
+        visitedCheckbox.checked = !nextVisited;
+      } finally {
+        visitedCheckbox.disabled = false;
+        updatingVisited = false;
+      }
+    });
+  }
 
   const lat = Number(place.lat);
   const lon = Number(place.lon);
@@ -508,8 +871,25 @@ function renderPlacemarkDetails(place) {
     placemarkDetailsEl.appendChild(infoList);
   }
 
+  if (visitedToggleEl) {
+    placemarkDetailsEl.appendChild(visitedToggleEl);
+  }
+
   if (!editing && tagsSection) {
     placemarkDetailsEl.appendChild(tagsSection);
+  }
+
+  let summarySection = null;
+  if (!editing) {
+    summarySection = document.createElement('div');
+    summarySection.className = 'placemark-summary';
+    placemarkDetailsEl.appendChild(summarySection);
+    renderSummaryIntoElement(summarySection, {
+      title: place.name || '',
+      subtitle: buildPlaceLocationHint(place)
+    });
+  } else {
+    setContextRefresh(null);
   }
 
   let tagListId = null;
@@ -517,6 +897,7 @@ function renderPlacemarkDetails(place) {
   actions.className = 'placemark-details__actions';
 
   if (editing) {
+    setContextRefresh(null);
     const form = document.createElement('form');
     form.className = 'placemark-details__form';
 
@@ -667,6 +1048,12 @@ function renderPlacemarkDetails(place) {
   if (actions.childElementCount > 0) {
     placemarkDetailsEl.appendChild(actions);
   }
+
+  if (!editing) {
+    renderContextSection(placemarkDetailsEl, {
+      emptyMessage: 'No other saved places are currently visible.'
+    });
+  }
 }
 
 function updateVisiblePlacemarkList() {
@@ -700,6 +1087,10 @@ export async function initTravelPanel() {
   const placeInput = document.getElementById('placeSearch');
   const resultsList = document.getElementById('placeResults');
   const searchPlaceBtn = document.getElementById('placeSearchBtn');
+  const quickSearchContainer = document.getElementById('quickSearches');
+  const quickSearchForm = document.getElementById('quickSearchForm');
+  const quickSearchInput = document.getElementById('quickSearchInput');
+  const sortByProximityBtn = document.getElementById('sortByProximityBtn');
   const tagFiltersDiv = document.getElementById('travelTagFilters');
   placemarkListEl = document.getElementById('placemarkList');
   placemarkDetailsEl = document.getElementById('placemarkDetails');
@@ -731,7 +1122,7 @@ export async function initTravelPanel() {
       [85.05112878, 180]
     ]
   }).addTo(map);
-  map.on('moveend', updateVisiblePlacemarkList);
+  map.on('moveend', handleMapMove);
   resizeTravelMap();
   renderPlacemarkDetails(null);
 
@@ -819,14 +1210,40 @@ export async function initTravelPanel() {
   let pendingAdds = [];
   let pendingUpdates = [];
   let pendingDeletes = [];
-  const persistPlaceUpdates = async (place, updates) => {
-    place.name = updates.name;
-    place.description = updates.description;
-    place.tags = updates.tags;
+  const persistPlaceUpdates = async (place, updates = {}) => {
+    if (!place) return;
+    const hasProp = key => Object.prototype.hasOwnProperty.call(updates, key);
+    if (hasProp('name')) {
+      place.name = updates.name;
+    } else if (typeof place.name === 'undefined') {
+      place.name = '';
+    }
+    if (hasProp('description')) {
+      place.description = updates.description;
+    } else if (typeof place.description === 'undefined') {
+      place.description = '';
+    }
+    if (hasProp('tags')) {
+      place.tags = Array.isArray(updates.tags) ? updates.tags : [];
+    } else if (!Array.isArray(place.tags)) {
+      place.tags = [];
+    }
     ensureDefaultTag(place);
-    place.Rating = updates.Rating;
-    place.Date = updates.Date;
-    place.visited = updates.visited;
+    if (hasProp('Rating')) {
+      place.Rating = updates.Rating;
+    } else if (typeof place.Rating === 'undefined') {
+      place.Rating = '';
+    }
+    if (hasProp('Date')) {
+      place.Date = updates.Date;
+    } else if (typeof place.Date === 'undefined') {
+      place.Date = '';
+    }
+    if (hasProp('visited')) {
+      place.visited = !!updates.visited;
+    } else {
+      place.visited = !!place.visited;
+    }
     const user = getCurrentUser?.();
     if (user) {
       localStorage.setItem(storageKey(), JSON.stringify(travelData));
@@ -1253,7 +1670,11 @@ export async function initTravelPanel() {
         // Don't auto-scroll to the map when selecting a place
       });
     });
-    updateVisiblePlacemarkList();
+    if (activeContextRefresh) {
+      activeContextRefresh();
+    } else {
+      updateVisiblePlacemarkList();
+    }
   };
 
   function updateSortIndicators() {
@@ -1466,6 +1887,7 @@ export async function initTravelPanel() {
     navigator.geolocation.getCurrentPosition(
       pos => {
         userCoords = [pos.coords.latitude, pos.coords.longitude];
+        focusMapNearUser();
         renderInitial();
       },
       () => {
@@ -1505,11 +1927,124 @@ export async function initTravelPanel() {
     return null;
   };
 
-  const searchForPlace = async () => {
-    if (!placeInput) return;
-    const term = placeInput.value.trim();
+  const ZIP_CODE_REGEX = /^\d{5}(?:-\d{4})?$/;
+  const isUnitedStates = value => {
+    if (!value) return false;
+    return /united states/i.test(value) || value.toLowerCase() === 'us';
+  };
+  const formatSearchResultSubtitle = (displayName, title, address = {}) => {
+    if (!displayName) return '';
+    const rawParts = displayName
+      .split(',')
+      .map(p => p.trim())
+      .filter(Boolean);
+    if (!rawParts.length) return '';
+    const parts = [];
+    for (let i = 0; i < rawParts.length; i += 1) {
+      const current = rawParts[i];
+      const next = rawParts[i + 1];
+      if (/^\d+$/.test(current) && next && /^[A-Za-z]/.test(next)) {
+        parts.push(`${current} ${next}`);
+        i += 1;
+      } else {
+        parts.push(current);
+      }
+    }
+    const normalizedTitle = (title || '').trim().toLowerCase();
+    const countryCode = address?.country_code?.toLowerCase();
+    const displayIndicatesUS = parts.some(part => /united states/i.test(part));
+    const removeCountry = countryCode === 'us' || (!countryCode && displayIndicatesUS);
+    const cleaned = [];
+    parts.forEach((part, idx) => {
+      const normalizedPart = part.toLowerCase();
+      if (idx === 0 && normalizedTitle && normalizedPart === normalizedTitle) {
+        return;
+      }
+      if (/county/i.test(part)) return;
+      if (ZIP_CODE_REGEX.test(part.replace(/\s+/g, ''))) return;
+      if (removeCountry && isUnitedStates(part)) return;
+      cleaned.push(part);
+    });
+    if (!cleaned.length) {
+      const fallback = parts.filter(
+        (part, idx) => !(idx === 0 && normalizedTitle && part.toLowerCase() === normalizedTitle)
+      );
+      return fallback.join(', ');
+    }
+    return cleaned.join(', ');
+  };
+
+  const RESULT_CLUSTER_TARGET_FRACTION = 0.75;
+  const RESULT_CLUSTER_MAX_ZOOM = 13;
+  const selectDenseCluster = points => {
+    if (!Array.isArray(points) || points.length <= 2) return points || [];
+    const targetCount = Math.max(2, Math.ceil(points.length * RESULT_CLUSTER_TARGET_FRACTION));
+    let bestCluster = points;
+    let tightestRadius = Infinity;
+    points.forEach(([anchorLat, anchorLon]) => {
+      const distances = points
+        .map(point => ({
+          point,
+          distance: haversine(anchorLat, anchorLon, point[0], point[1])
+        }))
+        .sort((a, b) => a.distance - b.distance);
+      const subset = distances.slice(0, targetCount);
+      const radius = subset[subset.length - 1]?.distance ?? Infinity;
+      if (radius < tightestRadius) {
+        tightestRadius = radius;
+        bestCluster = subset.map(entry => entry.point);
+      }
+    });
+    return bestCluster;
+  };
+
+  const focusMapOnResultCluster = points => {
+    if (!map || !Array.isArray(points) || !points.length) return;
+    if (points.length === 1) {
+      map.setView(points[0], 14);
+      return;
+    }
+    const clusterPoints = selectDenseCluster(points);
+    if (!clusterPoints.length) return;
+    if (clusterPoints.length === 1) {
+      map.setView(clusterPoints[0], 14);
+      return;
+    }
+    const bounds = L.latLngBounds(clusterPoints.map(([lat, lon]) => [lat, lon]));
+    map.fitBounds(bounds, {
+      padding: [48, 48],
+      maxZoom: RESULT_CLUSTER_MAX_ZOOM
+    });
+  };
+
+  const searchForPlace = async (termOverride = null, options = {}) => {
+    const providedTerm = termOverride ?? placeInput?.value ?? '';
+    const term = providedTerm.trim();
     if (!term) return;
+    if (placeInput && termOverride !== null) {
+      placeInput.value = term;
+    }
     clearSearchResults();
+
+    const bounds = options?.bounds ?? map?.getBounds?.();
+    const viewboxParams =
+      bounds && typeof bounds.getWest === 'function'
+        ? `&viewbox=${bounds.getWest()},${bounds.getNorth()},${bounds.getEast()},${bounds.getSouth()}&bounded=1`
+        : '';
+
+    const resultLatLngs = [];
+    const registerResultLatLng = (lat, lon) => {
+      if (Number.isFinite(lat) && Number.isFinite(lon)) {
+        resultLatLngs.push([lat, lon]);
+      }
+    };
+    let focusApplied = false;
+    const applyResultFocus = () => {
+      if (!focusApplied && resultLatLngs.length) {
+        focusMapOnResultCluster(resultLatLngs);
+        focusApplied = true;
+      }
+    };
 
     const appendSectionHeader = text => {
       if (!resultsList) return;
@@ -1529,6 +2064,7 @@ export async function initTravelPanel() {
     }
 
     existingMatches.forEach(p => {
+      registerResultLatLng(p.lat, p.lon);
       let card;
       const config = {
         variant: 'existing',
@@ -1563,6 +2099,7 @@ export async function initTravelPanel() {
     const coords = parseCoordinates(term);
     if (coords) {
       const { lat, lon } = coords;
+      registerResultLatLng(lat, lon);
       let card;
       let marker;
       const handleAdd = async () => {
@@ -1618,28 +2155,52 @@ export async function initTravelPanel() {
       });
       map.setView([lat, lon], 14);
       showDetails();
+      applyResultFocus();
       return;
     }
 
     try {
-      const resp = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=${NOMINATIM_RESULT_LIMIT}&q=${encodeURIComponent(term)}`);
+      const resp = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=${NOMINATIM_RESULT_LIMIT}&q=${encodeURIComponent(term)}${viewboxParams}`);
       if (!resp.ok) throw new Error('Search request failed');
       const data = await resp.json();
       if (Array.isArray(data) && data.length) {
         appendSectionHeader(existingMatches.length ? 'Other results' : 'Search results');
-        const latLngs = [];
         data.forEach(res => {
-          const { lat, lon, display_name } = res;
+          const { lat, lon, display_name, address, place_id } = res;
           const latitude = parseFloat(lat);
           const longitude = parseFloat(lon);
           if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
-          latLngs.push([latitude, longitude]);
-          let card;
-          const placeSummary = {
-            title: display_name.split(',')[0] || display_name,
-            subtitle: display_name,
+          const placeTitle = (display_name?.split(',')[0] || display_name || '').trim();
+          const hiddenKey = buildHiddenResultKey({
+            remoteId: place_id,
             lat: latitude,
             lon: longitude,
+            title: placeTitle
+          });
+          if (isSearchResultHidden(hiddenKey)) return;
+          registerResultLatLng(latitude, longitude);
+          let card;
+          let marker;
+          const subtitle = formatSearchResultSubtitle(display_name, placeTitle, address);
+          const placeSummary = {
+            title: placeTitle || 'Search result',
+            subtitle,
+            lat: latitude,
+            lon: longitude,
+          };
+          const handleDismiss = () => {
+            markSearchResultHidden(hiddenKey);
+            if (card?.isConnected) {
+              card.remove();
+            }
+            if (marker) {
+              marker.remove();
+              resultMarkers = resultMarkers.filter(m => m !== marker);
+            }
+            if (activeSearchResultCard === card) {
+              activeSearchResultCard = null;
+              renderPlacemarkOverview();
+            }
           };
           const handleAdd = async () => {
             const name =
@@ -1664,6 +2225,7 @@ export async function initTravelPanel() {
               map.setView([latitude, longitude], 14);
               showDetails();
             },
+            onDismiss: handleDismiss
           };
           card = createSearchResultListItem(placeSummary, config);
           resultsList?.append(card);
@@ -1679,18 +2241,13 @@ export async function initTravelPanel() {
             );
             highlightSearchResultCard(card);
           };
-          const marker = L.marker([latitude, longitude], { icon: resultIcon }).addTo(map);
+          marker = L.marker([latitude, longitude], { icon: resultIcon }).addTo(map);
           resultMarkers.push(marker);
           marker.on('click', () => {
             map.setView([latitude, longitude], 14);
             showDetails();
           });
         });
-        if (latLngs.length === 1) {
-          map.setView(latLngs[0], 14);
-        } else if (latLngs.length > 1) {
-          map.fitBounds(latLngs);
-        }
       } else if (!existingMatches.length) {
         const li = document.createElement('li');
         li.className = 'search-results__empty';
@@ -1704,6 +2261,7 @@ export async function initTravelPanel() {
       li.textContent = 'Search failed. Please try again.';
       resultsList?.append(li);
     }
+    applyResultFocus();
   };
 
   placeInput?.addEventListener('keydown', e => {
@@ -1711,10 +2269,74 @@ export async function initTravelPanel() {
     e.preventDefault();
     searchForPlace();
   });
-
   searchPlaceBtn?.addEventListener('click', e => {
     e.preventDefault();
     searchForPlace();
+  });
+
+  const handleQuickSearch = term => {
+    const normalized = normalizeQuickSearchTerm(term);
+    if (!normalized) return;
+    if (placeInput) {
+      placeInput.value = normalized;
+    }
+    const bounds = map?.getBounds?.();
+    searchForPlace(normalized, { bounds });
+  };
+
+  const renderQuickSearches = () => {
+    if (!quickSearchContainer) return;
+    quickSearchContainer.innerHTML = '';
+    if (!quickSearchTerms.length) {
+      const empty = document.createElement('div');
+      empty.className = 'placemark-overview__empty';
+      empty.textContent = 'No saved categories yet.';
+      quickSearchContainer.appendChild(empty);
+      return;
+    }
+    quickSearchTerms.forEach(term => {
+      const pill = document.createElement('span');
+      pill.className = 'quick-search-pill';
+      const searchBtn = document.createElement('button');
+      searchBtn.type = 'button';
+      searchBtn.className = 'quick-search-link';
+      searchBtn.textContent = term;
+      searchBtn.addEventListener('click', () => handleQuickSearch(term));
+      pill.appendChild(searchBtn);
+      if (!isDefaultQuickSearch(term)) {
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.className = 'quick-search-link__remove';
+        removeBtn.setAttribute('aria-label', `Remove ${term}`);
+        removeBtn.textContent = '×';
+        removeBtn.addEventListener('click', () => {
+          removeQuickSearchTerm(term);
+          renderQuickSearches();
+        });
+        pill.appendChild(removeBtn);
+      }
+      quickSearchContainer.appendChild(pill);
+    });
+  };
+
+  renderQuickSearches();
+
+  quickSearchForm?.addEventListener('submit', e => {
+    e.preventDefault();
+    const value = quickSearchInput?.value || '';
+    const added = addQuickSearchTerm(value);
+    if (added) {
+      renderQuickSearches();
+    }
+    if (quickSearchInput) {
+      quickSearchInput.value = '';
+    }
+  });
+
+  sortByProximityBtn?.addEventListener('click', () => {
+    sortByDistance = true;
+    sortKey = null;
+    renderList(currentSearch);
   });
 
   const addBtn = document.getElementById('addPlaceBtn');

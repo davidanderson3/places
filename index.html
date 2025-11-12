@@ -36,6 +36,13 @@
               <button type="button" id="placeSearchBtn">Search</button>
             </div>
             <ul id="placeResults" class="search-results"></ul>
+            <div class="quick-search-manager">
+              <div id="quickSearches" class="quick-searches"></div>
+              <form id="quickSearchForm" class="quick-search-form">
+                <input type="text" id="quickSearchInput" placeholder="Add search category (e.g., Cafés)" autocomplete="off">
+                <button type="submit">Add</button>
+              </form>
+            </div>
           </div>
           <div id="travelMap"></div>
           <div id="placemarkDetails">
@@ -43,18 +50,19 @@
           </div>
         </div>
         <div id="travelTagFilters"></div>
-        <input id="travelSearch" type="text" placeholder="Filter my places..." style="margin:8px 0;max-width:260px;">
+        <input id="travelSearch" class="travel-table-controls" type="text" placeholder="Filter my places..." style="margin:8px 0;max-width:260px;">
+        <button type="button" id="sortByProximityBtn" class="travel-table-controls">Sort by Proximity</button>
         <label id="showVisitedLabel">
           <input id="showVisitedToggle" type="checkbox">
           <span>Include visited</span>
         </label>
-        <div id="placeCount" style="margin:8px 0;"></div>
-        <div id="paginationControls" style="margin:8px 0; display:flex; align-items:center; gap:8px;">
+        <div id="placeCount" class="travel-table-controls" style="margin:8px 0;"></div>
+        <div id="paginationControls" class="travel-table-controls" style="margin:8px 0; display:flex; align-items:center; gap:8px;">
           <button type="button" id="prevPageBtn">Prev</button>
           <span id="pageInfo"></span>
           <button type="button" id="nextPageBtn">Next</button>
         </div>
-        <table id="travelTable">
+        <table id="travelTable" class="travel-table-controls">
           <thead>
             <tr>
               <th>Name</th>
