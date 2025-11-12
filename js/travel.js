@@ -62,6 +62,22 @@ let tableBody = null;
 let selectedPlaceRef = null;
 let detailsEditState = { place: null, editing: false };
 let savePlaceEdits = null;
+let searchResultsListEl = null;
+
+function updateMobilePlacemarkListState() {
+  if (!placemarkListEl) return;
+  const isMobile = window.matchMedia('(max-width: 600px)').matches;
+  if (!isMobile) {
+    placemarkListEl.classList.remove(
+      'placemark-list--mobile-collapsed',
+      'placemark-list--mobile-expanded'
+    );
+    return;
+  }
+  const hasResults = !!(searchResultsListEl && searchResultsListEl.childElementCount > 0);
+  placemarkListEl.classList.toggle('placemark-list--mobile-collapsed', !hasResults);
+  placemarkListEl.classList.toggle('placemark-list--mobile-expanded', hasResults);
+}
 
 function resizeTravelMap() {
   const mapEl = document.getElementById('travelMap');
@@ -73,8 +89,13 @@ function resizeTravelMap() {
   const height = Math.min(rect.width, availableHeight);
   mapEl.style.height = `${height}px`;
   if (listEl) {
-    listEl.style.maxHeight = `${height}px`;
-    listEl.style.height = `${height}px`;
+    if (window.innerWidth <= 600) {
+      listEl.style.maxHeight = '';
+      listEl.style.height = '';
+    } else {
+      listEl.style.maxHeight = `${height}px`;
+      listEl.style.height = `${height}px`;
+    }
   }
   if (detailsEl) {
     if (window.innerWidth >= 1024) {
@@ -87,6 +108,7 @@ function resizeTravelMap() {
     map.invalidateSize();
   }
   updateVisiblePlacemarkList();
+  updateMobilePlacemarkListState();
 }
 
 window.addEventListener('resize', resizeTravelMap);
@@ -701,8 +723,10 @@ export async function initTravelPanel() {
   const resultsList = document.getElementById('placeResults');
   const searchPlaceBtn = document.getElementById('placeSearchBtn');
   const tagFiltersDiv = document.getElementById('travelTagFilters');
+  searchResultsListEl = resultsList;
   placemarkListEl = document.getElementById('placemarkList');
   placemarkDetailsEl = document.getElementById('placemarkDetails');
+  updateMobilePlacemarkListState();
   const placeCountEl = document.getElementById('placeCount');
   const paginationDiv = document.getElementById('paginationControls');
   const prevPageBtn = document.getElementById('prevPageBtn');
@@ -1305,6 +1329,7 @@ export async function initTravelPanel() {
       if (!selectedPlaceRef && !detailsEditState.editing) {
         renderPlacemarkOverview();
       }
+      updateMobilePlacemarkListState();
     };
     placeInput?.setAttribute('autocomplete', 'off');
     placeInput?.addEventListener('input', e => {
@@ -1560,6 +1585,8 @@ export async function initTravelPanel() {
       resultsList?.append(card);
     });
 
+    updateMobilePlacemarkListState();
+
     const coords = parseCoordinates(term);
     if (coords) {
       const { lat, lon } = coords;
@@ -1598,6 +1625,7 @@ export async function initTravelPanel() {
         config
       );
       resultsList?.append(card);
+      updateMobilePlacemarkListState();
       const showDetails = () => {
         renderSearchResultDetails(
           {
@@ -1704,6 +1732,8 @@ export async function initTravelPanel() {
       li.textContent = 'Search failed. Please try again.';
       resultsList?.append(li);
     }
+
+    updateMobilePlacemarkListState();
   };
 
   placeInput?.addEventListener('keydown', e => {
