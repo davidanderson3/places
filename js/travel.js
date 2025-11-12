@@ -8,6 +8,7 @@ import {
 const BASE_KEY = 'travelData';
 const HIDDEN_SEARCH_RESULTS_KEY = 'travelHiddenSearchResults';
 const QUICK_SEARCHES_KEY = 'travelQuickSearches';
+const REMOVED_QUICK_SEARCHES_KEY = 'travelRemovedQuickSearches';
 const DEFAULT_QUICK_SEARCHES = ['Restaurants', 'Movie Theaters', 'Parks'];
 const WIKIPEDIA_SUMMARY_ENDPOINT =
   'https://en.wikipedia.org/api/rest_v1/page/summary/';
@@ -28,6 +29,7 @@ let activeContextRefresh = null;
 let summaryRequestCounter = 0;
 const summaryCache = new Map();
 let quickSearchTerms = [];
+let removedQuickSearchTerms = new Set();
 function loadHiddenSearchResults() {
   if (typeof localStorage === 'undefined') {
     hiddenSearchResultKeys = new Set();
@@ -58,6 +60,67 @@ function persistHiddenSearchResults() {
   } catch {
     // ignore storage failures
   }
+}
+
+function persistedTermKey(term) {
+  const normalized = normalizeQuickSearchTerm(term);
+  return normalized ? normalized.toLowerCase() : '';
+}
+
+function loadRemovedQuickSearchTerms() {
+  if (typeof localStorage === 'undefined') {
+    removedQuickSearchTerms = new Set();
+    return;
+  }
+  try {
+    const stored = localStorage.getItem(REMOVED_QUICK_SEARCHES_KEY);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      if (Array.isArray(parsed)) {
+        removedQuickSearchTerms = new Set(
+          parsed
+            .map(value => (typeof value === 'string' ? value.toLowerCase().trim() : ''))
+            .filter(Boolean)
+        );
+        return;
+      }
+    }
+  } catch {
+    // ignore
+  }
+  removedQuickSearchTerms = new Set();
+}
+
+function persistRemovedQuickSearchTerms() {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(
+      REMOVED_QUICK_SEARCHES_KEY,
+      JSON.stringify(Array.from(removedQuickSearchTerms))
+    );
+  } catch {
+    // ignore storage failures
+  }
+}
+
+function isQuickSearchTermRemoved(term) {
+  const key = persistedTermKey(term);
+  return !!key && removedQuickSearchTerms.has(key);
+}
+
+function markQuickSearchTermRemoved(term) {
+  const key = persistedTermKey(term);
+  if (!key) return;
+  removedQuickSearchTerms.add(key);
+  persistRemovedQuickSearchTerms();
+}
+
+function restoreQuickSearchTerm(term) {
+  const key = persistedTermKey(term);
+  if (!key || !removedQuickSearchTerms.has(key)) return false;
+  removedQuickSearchTerms.delete(key);
+  persistRemovedQuickSearchTerms();
+  return true;
 }
 
 function isSearchResultHidden(key) {
@@ -98,9 +161,16 @@ function loadQuickSearchTerms() {
     quickSearchTerms = DEFAULT_QUICK_SEARCHES.slice();
     return;
   }
+  loadRemovedQuickSearchTerms();
   try {
     const stored = localStorage.getItem(QUICK_SEARCHES_KEY);
-    let combined = DEFAULT_QUICK_SEARCHES.slice();
+    let combined = [];
+    DEFAULT_QUICK_SEARCHES.forEach(defaultTerm => {
+      const normalized = normalizeQuickSearchTerm(defaultTerm);
+      if (!normalized) return;
+      if (isQuickSearchTermRemoved(normalized)) return;
+      combined.push(normalized);
+    });
     if (stored) {
       const parsed = JSON.parse(stored);
       if (Array.isArray(parsed)) {
@@ -111,6 +181,7 @@ function loadQuickSearchTerms() {
     quickSearchTerms = combined
       .map(normalizeQuickSearchTerm)
       .filter(Boolean)
+      .filter(term => !isQuickSearchTermRemoved(term))
       .filter(term => {
         const key = term.toLowerCase();
         if (seen.has(key)) return false;
@@ -138,17 +209,19 @@ function addQuickSearchTerm(term) {
   const exists = quickSearchTerms.some(t => t.toLowerCase() === normalized.toLowerCase());
   if (exists) return false;
   quickSearchTerms.push(normalized);
+  restoreQuickSearchTerm(normalized);
   persistQuickSearchTerms();
   return true;
 }
 
 function removeQuickSearchTerm(term) {
-  if (!term || isDefaultQuickSearch(term)) return false;
+  if (!term) return false;
   const normalized = term.toLowerCase();
   const nextTerms = quickSearchTerms.filter(t => t.toLowerCase() !== normalized);
   if (nextTerms.length === quickSearchTerms.length) return false;
   quickSearchTerms = nextTerms;
   persistQuickSearchTerms();
+  markQuickSearchTermRemoved(term);
   return true;
 }
 
@@ -431,6 +504,104 @@ function focusMapNearUser() {
 }
 
 const NOMINATIM_RESULT_LIMIT = 15;
+
+const OVERPASS_ENDPOINT = 'https://overpass-api.de/api/interpreter?data=';
+const OVERPASS_TIMEOUT = 25;
+const OVERPASS_CATEGORY_CONFIGS = [
+  {
+    filter: '["amenity"="cinema"]',
+    label: 'Cinema',
+    matcher: term => /\b(?:movie|cinema|theater|theatre)\b/.test(term)
+  },
+  {
+    filter: '["amenity"="restaurant"]',
+    label: 'Restaurant',
+    matcher: term => /\b(?:restaurant|restaurants)\b/.test(term)
+  },
+  {
+    filter: '["leisure"="park"]',
+    label: 'Park',
+    matcher: term => /\b(?:park|parks)\b/.test(term)
+  }
+];
+
+function getOverpassCategoryConfig(term) {
+  if (!term) return null;
+  const normalized = term.toLowerCase();
+  return (
+    OVERPASS_CATEGORY_CONFIGS.find(config => config.matcher(normalized)) || null
+  );
+}
+
+function buildOverpassBounds(bounds) {
+  if (!bounds || typeof bounds.getSouth !== 'function') return null;
+  const south = bounds.getSouth().toFixed(6);
+  const west = bounds.getWest().toFixed(6);
+  const north = bounds.getNorth().toFixed(6);
+  const east = bounds.getEast().toFixed(6);
+  return `${south},${west},${north},${east}`;
+}
+
+async function fetchOverpassPlaces(config, bounds) {
+  const bbox = buildOverpassBounds(bounds);
+  if (!bbox) return [];
+  const query =
+    `[out:json][timeout:${OVERPASS_TIMEOUT}];` +
+    `(node${config.filter}(${bbox});` +
+    `way${config.filter}(${bbox});` +
+    `relation${config.filter}(${bbox}););` +
+    'out center;';
+  const resp = await fetch(`${OVERPASS_ENDPOINT}${encodeURIComponent(query)}`);
+  if (!resp.ok) {
+    throw new Error('Overpass request failed');
+  }
+  const data = await resp.json();
+  if (!Array.isArray(data?.elements)) return [];
+  const toNumber = value => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  };
+  return data.elements
+    .map(element => {
+      const latitude =
+        toNumber(element.lat) ?? toNumber(element.center?.lat);
+      const longitude =
+        toNumber(element.lon) ?? toNumber(element.center?.lon);
+      if (latitude === null || longitude === null) return null;
+      const name = (element.tags?.name || '').trim();
+      const subtitleParts = [];
+      const subtitleKeys = [
+        'brand',
+        'operator',
+        'addr:street',
+        'addr:city',
+        'addr:state',
+        'addr:postcode',
+        'addr:country'
+      ];
+      subtitleKeys.forEach(key => {
+        const value = element.tags?.[key];
+        if (value) subtitleParts.push(value);
+      });
+      const title = name || config.label || 'Search result';
+      const remoteId = `overpass:${element.type}:${element.id}`;
+      return {
+        title,
+        subtitle: subtitleParts.join(', ') || config.label || '',
+        lat: latitude,
+        lon: longitude,
+        remoteId,
+        hiddenKey: buildHiddenResultKey({
+          remoteId,
+          lat: latitude,
+          lon: longitude,
+          title
+        })
+      };
+    })
+    .filter(Boolean)
+    .slice(0, 25);
+}
 
 function haversine(lat1, lon1, lat2, lon2) {
   const R = 3958.8; // miles
@@ -1112,6 +1283,7 @@ export async function initTravelPanel() {
   const quickSearchContainer = document.getElementById('quickSearches');
   const quickSearchForm = document.getElementById('quickSearchForm');
   const quickSearchInput = document.getElementById('quickSearchInput');
+  const placeSearchStatusEl = document.getElementById('placeSearchStatus');
   const sortByProximityBtn = document.getElementById('sortByProximityBtn');
   const tagFiltersDiv = document.getElementById('travelTagFilters');
   searchResultsListEl = resultsList;
@@ -1999,6 +2171,57 @@ export async function initTravelPanel() {
     return cleaned.join(', ');
   };
 
+  const setSearchStatus = (message = '', showSpinner = false) => {
+    if (!placeSearchStatusEl) return;
+    placeSearchStatusEl.innerHTML = '';
+    if (!message) return;
+    if (showSpinner) {
+      const spinner = document.createElement('span');
+      spinner.className = 'place-search-status__spinner';
+      placeSearchStatusEl.appendChild(spinner);
+    }
+    placeSearchStatusEl.appendChild(document.createTextNode(message));
+  };
+
+  const NOMINATIM_BASE_URL = `https://nominatim.openstreetmap.org/search?format=json&limit=${NOMINATIM_RESULT_LIMIT}`;
+  const buildViewboxParams = bounds =>
+    bounds && typeof bounds.getWest === 'function'
+      ? `&viewbox=${bounds.getWest()},${bounds.getNorth()},${bounds.getEast()},${bounds.getSouth()}&bounded=1`
+      : '';
+  const extractNominatimSummaries = data => {
+    if (!Array.isArray(data)) return [];
+    return data
+      .map(res => {
+        const { lat, lon, display_name, address, place_id } = res;
+        const latitude = parseFloat(lat);
+        const longitude = parseFloat(lon);
+        if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+        const placeTitle = (display_name?.split(',')[0] || display_name || '').trim();
+        const subtitle = formatSearchResultSubtitle(display_name, placeTitle, address);
+        const hiddenKey = buildHiddenResultKey({
+          remoteId: place_id,
+          lat: latitude,
+          lon: longitude,
+          title: placeTitle
+        });
+        if (isSearchResultHidden(hiddenKey)) return null;
+        return {
+          title: placeTitle || 'Search result',
+          subtitle,
+          lat: latitude,
+          lon: longitude,
+          hiddenKey
+        };
+      })
+      .filter(Boolean);
+  };
+  const queryNominatimForTerm = async (term, viewboxParams) => {
+    const resp = await fetch(`${NOMINATIM_BASE_URL}&q=${encodeURIComponent(term)}${viewboxParams || ''}`);
+    if (!resp.ok) throw new Error('Search request failed');
+    const data = await resp.json();
+    return extractNominatimSummaries(data);
+  };
+
   const RESULT_CLUSTER_TARGET_FRACTION = 0.75;
   const RESULT_CLUSTER_MAX_ZOOM = 13;
   const selectDenseCluster = points => {
@@ -2052,10 +2275,9 @@ export async function initTravelPanel() {
     clearSearchResults();
 
     const bounds = options?.bounds ?? map?.getBounds?.();
-    const viewboxParams =
-      bounds && typeof bounds.getWest === 'function'
-        ? `&viewbox=${bounds.getWest()},${bounds.getNorth()},${bounds.getEast()},${bounds.getSouth()}&bounded=1`
-        : '';
+    const viewboxParams = buildViewboxParams(bounds);
+
+    setSearchStatus(`Searching for "${term}"…`, true);
 
     const resultLatLngs = [];
     const registerResultLatLng = (lat, lon) => {
@@ -2142,7 +2364,6 @@ export async function initTravelPanel() {
           Date: '',
           visited: false
         });
-        clearSearchResults();
         placeInput.value = '';
       };
       const config = {
@@ -2183,41 +2404,51 @@ export async function initTravelPanel() {
       });
       map.setView([lat, lon], 14);
       showDetails();
+      setSearchStatus('', false);
       applyResultFocus();
       return;
     }
 
     try {
-      const resp = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=${NOMINATIM_RESULT_LIMIT}&q=${encodeURIComponent(term)}${viewboxParams}`);
-      if (!resp.ok) throw new Error('Search request failed');
-      const data = await resp.json();
-      if (Array.isArray(data) && data.length) {
-        appendSectionHeader(existingMatches.length ? 'Other results' : 'Search results');
-        data.forEach(res => {
-          const { lat, lon, display_name, address, place_id } = res;
-          const latitude = parseFloat(lat);
-          const longitude = parseFloat(lon);
-          if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
-          const placeTitle = (display_name?.split(',')[0] || display_name || '').trim();
-          const hiddenKey = buildHiddenResultKey({
-            remoteId: place_id,
-            lat: latitude,
-            lon: longitude,
-            title: placeTitle
+      let placeSummaries = await queryNominatimForTerm(term, viewboxParams);
+      let boundsForCategorySearch = bounds;
+      if (!placeSummaries.length && viewboxParams && bounds?.pad) {
+        setSearchStatus('No results within the current view; expanding area…', true);
+        const expandedBounds = bounds.pad(2);
+        const expandedViewbox = buildViewboxParams(expandedBounds);
+        if (expandedViewbox) {
+          placeSummaries = await queryNominatimForTerm(term, expandedViewbox);
+          boundsForCategorySearch = expandedBounds;
+        }
+      }
+
+      const overpassConfig = getOverpassCategoryConfig(normalizedTerm);
+      if (overpassConfig && boundsForCategorySearch) {
+        try {
+          const overpassResults = await fetchOverpassPlaces(overpassConfig, boundsForCategorySearch);
+          overpassResults.forEach(extra => {
+            if (!extra || isSearchResultHidden(extra.hiddenKey)) return;
+            placeSummaries.push(extra);
           });
-          if (isSearchResultHidden(hiddenKey)) return;
+        } catch (overpassErr) {
+          console.warn('Overpass search failed', overpassErr);
+        }
+      }
+
+      if (placeSummaries.length) {
+        appendSectionHeader(existingMatches.length ? 'Other results' : 'Search results');
+        placeSummaries.forEach(placeSummary => {
+          const latitude = placeSummary.lat;
+          const longitude = placeSummary.lon;
+          if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
           registerResultLatLng(latitude, longitude);
           let card;
           let marker;
-          const subtitle = formatSearchResultSubtitle(display_name, placeTitle, address);
-          const placeSummary = {
-            title: placeTitle || 'Search result',
-            subtitle,
-            lat: latitude,
-            lon: longitude,
-          };
+          const hiddenKey = placeSummary.hiddenKey;
           const handleDismiss = () => {
-            markSearchResultHidden(hiddenKey);
+            if (hiddenKey) {
+              markSearchResultHidden(hiddenKey);
+            }
             if (card?.isConnected) {
               card.remove();
             }
@@ -2244,7 +2475,6 @@ export async function initTravelPanel() {
               Date: '',
               visited: false
             });
-            clearSearchResults();
             placeInput.value = '';
           };
           const config = {
@@ -2255,7 +2485,15 @@ export async function initTravelPanel() {
             },
             onDismiss: handleDismiss
           };
-          card = createSearchResultListItem(placeSummary, config);
+          card = createSearchResultListItem(
+            {
+              title: placeSummary.title,
+              subtitle: placeSummary.subtitle || '',
+              lat: latitude,
+              lon: longitude,
+            },
+            config
+          );
           resultsList?.append(card);
           const showDetails = () => {
             renderSearchResultDetails(
@@ -2288,6 +2526,8 @@ export async function initTravelPanel() {
       li.className = 'search-results__empty';
       li.textContent = 'Search failed. Please try again.';
       resultsList?.append(li);
+    } finally {
+      setSearchStatus('', false);
     }
     applyResultFocus();
 
@@ -2333,18 +2573,16 @@ export async function initTravelPanel() {
       searchBtn.textContent = term;
       searchBtn.addEventListener('click', () => handleQuickSearch(term));
       pill.appendChild(searchBtn);
-      if (!isDefaultQuickSearch(term)) {
-        const removeBtn = document.createElement('button');
-        removeBtn.type = 'button';
-        removeBtn.className = 'quick-search-link__remove';
-        removeBtn.setAttribute('aria-label', `Remove ${term}`);
-        removeBtn.textContent = '×';
-        removeBtn.addEventListener('click', () => {
-          removeQuickSearchTerm(term);
-          renderQuickSearches();
-        });
-        pill.appendChild(removeBtn);
-      }
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'quick-search-link__remove';
+      removeBtn.setAttribute('aria-label', `Remove ${term}`);
+      removeBtn.textContent = '×';
+      removeBtn.addEventListener('click', () => {
+        removeQuickSearchTerm(term);
+        renderQuickSearches();
+      });
+      pill.appendChild(removeBtn);
       quickSearchContainer.appendChild(pill);
     });
   };

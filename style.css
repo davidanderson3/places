@@ -1448,6 +1448,31 @@ h2 {
   margin-top: 0;
 }
 
+#placeSearchStatus {
+  min-height: 20px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.9rem;
+  color: #4a4a4a;
+  padding-left: 4px;
+}
+
+.place-search-status__spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(66, 133, 244, 0.3);
+  border-top-color: #4285f4;
+  border-radius: 50%;
+  animation: place-search-spin 0.8s linear infinite;
+}
+
+@keyframes place-search-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 #showVisitedLabel {
   display: inline-flex;
   align-items: center;
@@ -1464,13 +1489,19 @@ h2 {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-bottom: 8px;
+  margin: 0;
 }
 
 .quick-search-manager {
-  margin-top: 12px;
+  margin-top: 6px;
   display: flex;
   flex-direction: column;
+  border: 1px solid #d4dae4;
+  border-radius: 14px;
+  padding: 10px 14px;
+  background: #fff;
+  gap: 8px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.04);
 }
 
 .quick-search-pill {
@@ -1505,11 +1536,13 @@ h2 {
   font-size: 0.9rem;
   line-height: 1;
   padding: 0;
+  appearance: none;
 }
 
 .quick-search-link__remove:hover,
 .quick-search-link__remove:focus-visible {
   color: #333;
+  background: transparent;
 }
 
 .quick-search-form {
