@@ -1640,6 +1640,28 @@ h2 {
   overflow: hidden;
 }
 
+@media (max-width: 600px) {
+  #placemarkList {
+    transition: max-height 0.3s ease, padding 0.3s ease;
+  }
+
+  #placemarkList.placemark-list--mobile-collapsed {
+    max-height: 72px;
+    overflow: hidden;
+    padding-bottom: 4px;
+  }
+
+  #placemarkList.placemark-list--mobile-collapsed #placeResults {
+    display: none;
+  }
+
+  #placemarkList.placemark-list--mobile-expanded {
+    max-height: min(70vh, 420px);
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+}
+
 #travelMap {
   flex: 1 1 100%;
   width: 100%;
