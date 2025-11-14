@@ -10,10 +10,6 @@ const HIDDEN_SEARCH_RESULTS_KEY = 'travelHiddenSearchResults';
 const QUICK_SEARCHES_KEY = 'travelQuickSearches';
 const REMOVED_QUICK_SEARCHES_KEY = 'travelRemovedQuickSearches';
 const DEFAULT_QUICK_SEARCHES = ['Restaurants', 'Movie Theaters', 'Parks'];
-const WIKIPEDIA_SUMMARY_ENDPOINT =
-  'https://en.wikipedia.org/api/rest_v1/page/summary/';
-const WIKIPEDIA_SEARCH_ENDPOINT =
-  'https://en.wikipedia.org/w/api.php?action=opensearch&limit=1&format=json&origin=*';
 
 function storageKeyForUser(uid) {
   return uid ? `${BASE_KEY}-${uid}` : BASE_KEY;
@@ -225,126 +221,215 @@ function removeQuickSearchTerm(term) {
   return true;
 }
 
-loadQuickSearchTerms();
+const AI_KEY_STORAGE = 'travelOpenAiKey';
+const AI_SUMMARY_STORAGE = 'travelAiSummaries';
+const aiSummaries = new Map();
+let openAiKey = '';
 
-function buildSummaryQueries(title, subtitle = '') {
-  const clean = val =>
-    (val || '')
-      .replace(/\s+/g, ' ')
-      .trim();
-  const queries = [];
-  const baseTitle = clean(title);
-  if (baseTitle) queries.push(baseTitle);
-  const subtitleFirstChunk = clean(subtitle.split(',')[0]);
-  if (baseTitle && subtitleFirstChunk) {
-    queries.push(`${baseTitle} ${subtitleFirstChunk}`);
-  }
-  if (subtitle) {
-    queries.push(clean(subtitle));
-  }
-  return Array.from(new Set(queries.filter(Boolean)));
+function buildAiSummaryKey(title, subtitle) {
+  const keyTitle = (title || '').trim();
+  const keySubtitle = (subtitle || '').trim();
+  if (!keyTitle && !keySubtitle) return '';
+  return `${keyTitle}||${keySubtitle}`;
 }
 
-async function searchWikipediaTitle(term) {
-  const resp = await fetch(`${WIKIPEDIA_SEARCH_ENDPOINT}&search=${encodeURIComponent(term)}`);
-  if (!resp.ok) {
-    throw new Error('Search request failed');
+function loadAiSummaries() {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    const stored = localStorage.getItem(AI_SUMMARY_STORAGE);
+    if (!stored) return;
+    const parsed = JSON.parse(stored);
+    if (parsed && typeof parsed === 'object') {
+      Object.entries(parsed).forEach(([key, value]) => {
+        if (typeof value === 'string') {
+          aiSummaries.set(key, value);
+        }
+      });
+    }
+  } catch {
+    // ignore
   }
-  const data = await resp.json();
-  if (Array.isArray(data) && data.length >= 2 && Array.isArray(data[1]) && data[1].length) {
-    return data[1][0];
-  }
-  return null;
 }
 
-async function fetchWikipediaSummary(term, visited = new Set()) {
-  const normalizedKey = term.toLowerCase();
-  if (visited.has(normalizedKey)) return null;
-  visited.add(normalizedKey);
-  const summaryUrl = `${WIKIPEDIA_SUMMARY_ENDPOINT}${encodeURIComponent(term)}`;
-  const resp = await fetch(summaryUrl, {
-    headers: { Accept: 'application/json' }
+function persistAiSummaries() {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    const obj = Object.fromEntries(aiSummaries);
+    localStorage.setItem(AI_SUMMARY_STORAGE, JSON.stringify(obj));
+  } catch {
+    // ignore
+  }
+}
+
+function setAiSummaryForKey(key, text) {
+  if (!key) return;
+  if (text) {
+    aiSummaries.set(key, text);
+  } else {
+    aiSummaries.delete(key);
+  }
+  persistAiSummaries();
+}
+
+function loadOpenAiKey() {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    const stored = localStorage.getItem(AI_KEY_STORAGE);
+    if (stored) {
+      openAiKey = stored;
+    }
+  } catch {
+    // ignore
+  }
+}
+
+function persistOpenAiKey(value) {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    if (value) {
+      localStorage.setItem(AI_KEY_STORAGE, value);
+    } else {
+      localStorage.removeItem(AI_KEY_STORAGE);
+    }
+  } catch {
+    // ignore
+  }
+}
+
+loadAiSummaries();
+loadOpenAiKey();
+
+function extractAiResponseText(data) {
+  if (!data || !Array.isArray(data.output)) return '';
+  const texts = [];
+  data.output.forEach(item => {
+    if (item?.type === 'output_text' && typeof item.text === 'string') {
+      texts.push(item.text);
+    }
+    if (Array.isArray(item?.content)) {
+      item.content.forEach(content => {
+        if (content?.type === 'output_text' && typeof content.text === 'string') {
+          texts.push(content.text);
+        }
+      });
+    }
   });
-  if (resp.status === 404) {
-    const alternate = await searchWikipediaTitle(term);
-    if (alternate && alternate.toLowerCase() !== normalizedKey) {
-      return fetchWikipediaSummary(alternate, visited);
-    }
-    throw new Error(`No summary found for ${term}`);
-  }
-  if (!resp.ok) {
-    throw new Error(`Summary request failed for ${term}`);
-  }
-  const data = await resp.json();
-  if (!data?.extract) {
-    throw new Error('No extract returned');
-  }
-  return {
-    text: data.extract,
-    url:
-      data.content_urls?.desktop?.page ||
-      data.content_urls?.mobile?.page ||
-      data?.extract_html
-  };
+  return texts.join(' ').trim();
 }
 
-async function fetchSummaryFromCandidates(candidates) {
-  for (const candidate of candidates) {
-    const key = candidate.toLowerCase();
-    if (summaryCache.has(key)) {
-      const cached = summaryCache.get(key);
-      if (cached) return cached;
-      continue;
-    }
-    try {
-      const summary = await fetchWikipediaSummary(candidate);
-      summaryCache.set(key, summary);
-      return summary;
-    } catch (err) {
-      summaryCache.set(key, null);
-      console.warn('Summary lookup failed for', candidate, err);
-    }
+async function fetchOpenAiSummary({ title, subtitle }) {
+  if (!openAiKey) {
+    throw new Error('OpenAI API key is required');
   }
-  return null;
-}
-
-function renderSummaryIntoElement(el, { title, subtitle }) {
-  if (!el) return;
-  const requestId = ++summaryRequestCounter;
-  el.dataset.summaryRequestId = String(requestId);
-  el.textContent = 'Generating summary…';
-  const candidates = buildSummaryQueries(title, subtitle);
-  if (!candidates.length) {
-    el.textContent = 'No summary available.';
-    return;
-  }
-  fetchSummaryFromCandidates(candidates)
-    .then(summary => {
-      if (el.dataset.summaryRequestId !== String(requestId)) return;
-      if (!summary?.text) {
-        el.textContent = 'No summary available.';
-        return;
-      }
-      el.innerHTML = '';
-      const copy = document.createElement('p');
-      copy.textContent = summary.text;
-      el.appendChild(copy);
-      if (summary.url) {
-        const link = document.createElement('a');
-        link.href = summary.url;
-        link.target = '_blank';
-        link.rel = 'noopener noreferrer';
-        link.textContent = 'Read more on Wikipedia';
-        link.className = 'placemark-summary__link';
-        el.appendChild(link);
-      }
+  const safeTitle = (title || 'this place').trim();
+  const safeSubtitle = (subtitle || '').trim();
+  const locationHint = safeSubtitle ? ` at ${safeSubtitle}` : '';
+  const prompt = `Write a concise description of ${safeTitle}${locationHint}, including its address and what makes the place notable.`;
+  const response = await fetch('https://api.openai.com/v1/responses', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${openAiKey}`
+    },
+    body: JSON.stringify({
+      model: 'gpt-5.1',
+      input: [
+        {
+          role: 'user',
+          content: prompt
+        }
+      ],
+      text: {
+        format: { type: 'text' },
+        verbosity: 'medium'
+      },
+      reasoning: {
+        effort: 'medium'
+      },
+      tools: [],
+      store: true,
+      include: ['reasoning.encrypted_content', 'web_search_call.action.sources']
     })
-    .catch(() => {
-      if (el.dataset.summaryRequestId !== String(requestId)) return;
-      el.textContent = 'No summary available.';
-    });
+  });
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => null);
+    const message = errorData?.error?.message || 'Failed to fetch AI summary.';
+    throw new Error(message);
+  }
+  const data = await response.json();
+  const outputText = extractAiResponseText(data);
+  if (!outputText) {
+    throw new Error('No summary returned');
+  }
+  return outputText;
 }
 
+function renderAiSummarySection(el, { title, subtitle }) {
+  if (!el) return;
+  const summaryKey = buildAiSummaryKey(title, subtitle);
+  const cached = summaryKey ? aiSummaries.get(summaryKey) || '' : '';
+
+  el.innerHTML = '';
+
+  const actions = document.createElement('div');
+  actions.className = 'ai-summary__actions';
+  const generateBtn = document.createElement('button');
+  generateBtn.type = 'button';
+  generateBtn.textContent = 'Generate AI summary';
+  actions.appendChild(generateBtn);
+
+  const spinner = document.createElement('span');
+  spinner.className = 'ai-summary__spinner';
+  spinner.setAttribute('aria-hidden', 'true');
+  spinner.style.display = 'none';
+  actions.appendChild(spinner);
+
+  el.appendChild(actions);
+
+  let resultEl = null;
+  const ensureResultEl = text => {
+    if (!resultEl) {
+      resultEl = document.createElement('div');
+      resultEl.className = 'ai-summary__result';
+      el.appendChild(resultEl);
+    }
+    if (text !== undefined) {
+      resultEl.textContent = text;
+    }
+  };
+  if (cached) {
+    ensureResultEl(cached);
+  }
+
+  const showSpinner = () => {
+    spinner.style.display = '';
+  };
+  const hideSpinner = () => {
+    spinner.style.display = 'none';
+  };
+
+  generateBtn.addEventListener('click', async () => {
+    if (!openAiKey) {
+      alert('OpenAI API key required to generate summaries.');
+      return;
+    }
+    generateBtn.disabled = true;
+    showSpinner();
+    try {
+      const text = await fetchOpenAiSummary({ title: title || '', subtitle });
+      ensureResultEl(text);
+      if (summaryKey) {
+        setAiSummaryForKey(summaryKey, text);
+      }
+    } catch (err) {
+      const message = err?.message || 'Failed to fetch summary.';
+      alert(message);
+    } finally {
+      generateBtn.disabled = false;
+      hideSpinner();
+    }
+  });
+}
 let lastUserId = null;
 
 auth.onAuthStateChanged(user => {
@@ -819,7 +904,7 @@ function renderSearchResultDetails(result, { onAdd } = {}) {
     const summarySection = document.createElement('div');
     summarySection.className = 'placemark-summary';
     placemarkDetailsEl.appendChild(summarySection);
-    renderSummaryIntoElement(summarySection, {
+    renderAiSummarySection(summarySection, {
       title: result.title || '',
       subtitle: result.description || result.subtitle || ''
     });
@@ -1077,7 +1162,7 @@ function renderPlacemarkDetails(place) {
     summarySection = document.createElement('div');
     summarySection.className = 'placemark-summary';
     placemarkDetailsEl.appendChild(summarySection);
-    renderSummaryIntoElement(summarySection, {
+    renderAiSummarySection(summarySection, {
       title: place.name || '',
       subtitle: buildPlaceLocationHint(place)
     });
@@ -2279,16 +2364,24 @@ export async function initTravelPanel() {
 
     setSearchStatus(`Searching for "${term}"…`, true);
 
-    const resultLatLngs = [];
-    const registerResultLatLng = (lat, lon) => {
-      if (Number.isFinite(lat) && Number.isFinite(lon)) {
-        resultLatLngs.push([lat, lon]);
+    const searchResultLatLngs = [];
+    const savedMatchLatLngs = [];
+    const registerResultLatLng = (lat, lon, source = 'search') => {
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+      if (source === 'saved') {
+        savedMatchLatLngs.push([lat, lon]);
+      } else {
+        searchResultLatLngs.push([lat, lon]);
       }
     };
     let focusApplied = false;
     const applyResultFocus = () => {
-      if (!focusApplied && resultLatLngs.length) {
-        focusMapOnResultCluster(resultLatLngs);
+      if (focusApplied) return;
+      const focusPoints = searchResultLatLngs.length
+        ? searchResultLatLngs
+        : savedMatchLatLngs;
+      if (focusPoints.length) {
+        focusMapOnResultCluster(focusPoints);
         focusApplied = true;
       }
     };
@@ -2302,16 +2395,22 @@ export async function initTravelPanel() {
     };
 
     const normalizedTerm = term.toLowerCase();
-    const existingMatches = travelData.filter(p =>
-      p.name.toLowerCase().includes(normalizedTerm)
-    );
+    const searchWords = normalizedTerm.split(/\s+/).filter(Boolean);
+    const matchesSearchWords = text =>
+      searchWords.length > 0 &&
+      searchWords.every(word => text.includes(word));
+
+    const existingMatches = travelData.filter(place => {
+      const haystack = `${place.name || ''} ${place.description || ''}`.toLowerCase();
+      return matchesSearchWords(haystack);
+    });
 
     if (existingMatches.length) {
       appendSectionHeader('Saved places');
     }
 
-    existingMatches.forEach(p => {
-      registerResultLatLng(p.lat, p.lon);
+      existingMatches.forEach(p => {
+        registerResultLatLng(p.lat, p.lon, 'saved');
       let card;
       const config = {
         variant: 'existing',
@@ -2435,9 +2534,23 @@ export async function initTravelPanel() {
         }
       }
 
-      if (placeSummaries.length) {
+      const matchesSummary = summary => {
+        const titleText = `${summary.title || ''} ${summary.subtitle || ''}`.toLowerCase();
+        return matchesSearchWords(titleText);
+      };
+      let filteredSummaries = placeSummaries.filter(matchesSummary);
+      if (!filteredSummaries.length && !existingMatches.length) {
+        setSearchStatus(`No nearby results for "${term}"; searching worldwide…`, true);
+        const globalResults = await queryNominatimForTerm(term);
+        filteredSummaries = globalResults.filter(matchesSummary);
+        if (filteredSummaries.length) {
+          setSearchStatus(`Showing best worldwide match for "${term}".`, true);
+        }
+      }
+
+      if (filteredSummaries.length) {
         appendSectionHeader(existingMatches.length ? 'Other results' : 'Search results');
-        placeSummaries.forEach(placeSummary => {
+        filteredSummaries.forEach(placeSummary => {
           const latitude = placeSummary.lat;
           const longitude = placeSummary.lon;
           if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
