@@ -1314,13 +1314,30 @@ function renderPlacemarkDetails(place) {
   }
 
   if (hasCoords) {
+    const linkGroup = document.createElement('div');
+    linkGroup.className = 'placemark-details__direction-links';
+
     const directionsLink = document.createElement('a');
     directionsLink.className = 'placemark-details__directions';
     directionsLink.href = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}`;
     directionsLink.target = '_blank';
     directionsLink.rel = 'noopener noreferrer';
     directionsLink.textContent = 'Get Directions';
-    actions.append(directionsLink);
+
+    const separator = document.createElement('span');
+    separator.className = 'placemark-details__direction-separator';
+    separator.textContent = ' | ';
+
+    const webSearchLink = document.createElement('a');
+    webSearchLink.className = 'placemark-details__web-search';
+    const searchName = encodeURIComponent(place.name || 'place');
+    webSearchLink.href = `https://www.google.com/search?q=${searchName}`;
+    webSearchLink.target = '_blank';
+    webSearchLink.rel = 'noopener noreferrer';
+    webSearchLink.textContent = 'Search the Web';
+
+    linkGroup.append(directionsLink, separator, webSearchLink);
+    actions.append(linkGroup);
   }
 
   if (actions.childElementCount > 0) {

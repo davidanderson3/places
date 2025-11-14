@@ -2128,6 +2128,26 @@ h2 {
   text-decoration: underline;
 }
 
+.placemark-details__web-search {
+  color: #0066cc;
+  text-decoration: none;
+  margin-top: 0;
+}
+
+.placemark-details__web-search:hover {
+  text-decoration: underline;
+}
+
+.placemark-details__direction-links {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+}
+
+.placemark-details__direction-separator {
+  color: #5f6368;
+}
+
 #travelTagFilters {
   margin-top: 8px;
   display: flex;
