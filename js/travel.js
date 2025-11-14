@@ -366,6 +366,7 @@ async function fetchOpenAiSummary({ title, subtitle }) {
 
 function renderAiSummarySection(el, { title, subtitle }) {
   if (!el) return;
+  const placeName = (title || 'this place').trim();
   const summaryKey = buildAiSummaryKey(title, subtitle);
   const cached = summaryKey ? aiSummaries.get(summaryKey) || '' : '';
 
@@ -385,6 +386,48 @@ function renderAiSummarySection(el, { title, subtitle }) {
   actions.appendChild(spinner);
 
   el.appendChild(actions);
+
+  if (!openAiKey) {
+    const keyRow = document.createElement('div');
+    keyRow.className = 'ai-summary__key-row';
+    const keyLabel = document.createElement('label');
+    keyLabel.className = 'ai-summary__key-label';
+    keyLabel.textContent = 'OpenAI API key';
+    const keyInput = document.createElement('input');
+    keyInput.className = 'ai-summary__key-input';
+    keyInput.type = 'password';
+    keyInput.placeholder = 'Enter OpenAI API key';
+    keyLabel.appendChild(keyInput);
+    keyRow.appendChild(keyLabel);
+    const keyActions = document.createElement('div');
+    keyActions.className = 'ai-summary__key-actions';
+    const saveKeyBtn = document.createElement('button');
+    saveKeyBtn.type = 'button';
+    saveKeyBtn.textContent = 'Save key';
+    const keyStatus = document.createElement('div');
+    keyStatus.className = 'ai-summary__key-status';
+    const updateKeyStatus = () => {
+      keyStatus.innerHTML = '';
+      const info = document.createTextNode('No API key configured. Get one at ');
+      const platformLink = document.createElement('a');
+      platformLink.href = 'https://platform.openai.com/api-keys';
+      platformLink.target = '_blank';
+      platformLink.rel = 'noopener noreferrer';
+      platformLink.textContent = 'platform.openai.com';
+      keyStatus.append(info, platformLink);
+    };
+    updateKeyStatus();
+    saveKeyBtn.addEventListener('click', () => {
+      const trimmed = keyInput.value.trim();
+      if (!trimmed) return;
+      openAiKey = trimmed;
+      persistOpenAiKey(trimmed);
+      renderAiSummarySection(el, { title: placeName, subtitle });
+    });
+    keyActions.append(saveKeyBtn, keyStatus);
+    keyRow.appendChild(keyActions);
+    el.appendChild(keyRow);
+  }
 
   let resultEl = null;
   const ensureResultEl = text => {
@@ -416,7 +459,7 @@ function renderAiSummarySection(el, { title, subtitle }) {
     generateBtn.disabled = true;
     showSpinner();
     try {
-      const text = await fetchOpenAiSummary({ title: title || '', subtitle });
+      const text = await fetchOpenAiSummary({ title: placeName, subtitle });
       ensureResultEl(text);
       if (summaryKey) {
         setAiSummaryForKey(summaryKey, text);
