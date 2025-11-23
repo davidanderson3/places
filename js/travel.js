@@ -7,9 +7,26 @@ import {
 
 const BASE_KEY = 'travelData';
 const HIDDEN_SEARCH_RESULTS_KEY = 'travelHiddenSearchResults';
-const QUICK_SEARCHES_KEY = 'travelQuickSearches';
-const REMOVED_QUICK_SEARCHES_KEY = 'travelRemovedQuickSearches';
-const DEFAULT_QUICK_SEARCHES = ['Restaurants', 'Movie Theaters', 'Parks'];
+const PHOTON_ENDPOINT = 'https://photon.komoot.io/api';
+const PHOTON_RESULT_LIMIT = 10;
+const SEARCH_SYNONYM_MAP = new Map([
+  ['theatre', ['theater']],
+  ['theater', ['theatre']],
+  ['cafe', ['café', 'coffee', 'coffeeshop', 'coffeehouse']],
+  ['café', ['cafe', 'coffee', 'coffeeshop', 'coffeehouse']],
+  ['coffe', ['coffee', 'cafe', 'café']],
+  ['resturant', ['restaurant']],
+  ['restraunt', ['restaurant']],
+  ['restauraunt', ['restaurant']],
+  ['musuem', ['museum']],
+  ['muesum', ['museum']],
+  ['pharmcy', ['pharmacy']],
+  ['pharamacy', ['pharmacy']],
+  ['drugstore', ['pharmacy']],
+  ['petrol', ['gas']],
+  ['gasolene', ['gas']],
+  ['fuel', ['gas']]
+]);
 
 function storageKeyForUser(uid) {
   return uid ? `${BASE_KEY}-${uid}` : BASE_KEY;
@@ -24,8 +41,14 @@ let hiddenSearchResultKeys = new Set();
 let activeContextRefresh = null;
 let summaryRequestCounter = 0;
 const summaryCache = new Map();
-let quickSearchTerms = [];
-let removedQuickSearchTerms = new Set();
+const searchCache = new Map();
+const debounce = (fn, delay = 250) => {
+  let handle = null;
+  return (...args) => {
+    clearTimeout(handle);
+    handle = setTimeout(() => fn(...args), delay);
+  };
+};
 function loadHiddenSearchResults() {
   if (typeof localStorage === 'undefined') {
     hiddenSearchResultKeys = new Set();
@@ -58,67 +81,6 @@ function persistHiddenSearchResults() {
   }
 }
 
-function persistedTermKey(term) {
-  const normalized = normalizeQuickSearchTerm(term);
-  return normalized ? normalized.toLowerCase() : '';
-}
-
-function loadRemovedQuickSearchTerms() {
-  if (typeof localStorage === 'undefined') {
-    removedQuickSearchTerms = new Set();
-    return;
-  }
-  try {
-    const stored = localStorage.getItem(REMOVED_QUICK_SEARCHES_KEY);
-    if (stored) {
-      const parsed = JSON.parse(stored);
-      if (Array.isArray(parsed)) {
-        removedQuickSearchTerms = new Set(
-          parsed
-            .map(value => (typeof value === 'string' ? value.toLowerCase().trim() : ''))
-            .filter(Boolean)
-        );
-        return;
-      }
-    }
-  } catch {
-    // ignore
-  }
-  removedQuickSearchTerms = new Set();
-}
-
-function persistRemovedQuickSearchTerms() {
-  if (typeof localStorage === 'undefined') return;
-  try {
-    localStorage.setItem(
-      REMOVED_QUICK_SEARCHES_KEY,
-      JSON.stringify(Array.from(removedQuickSearchTerms))
-    );
-  } catch {
-    // ignore storage failures
-  }
-}
-
-function isQuickSearchTermRemoved(term) {
-  const key = persistedTermKey(term);
-  return !!key && removedQuickSearchTerms.has(key);
-}
-
-function markQuickSearchTermRemoved(term) {
-  const key = persistedTermKey(term);
-  if (!key) return;
-  removedQuickSearchTerms.add(key);
-  persistRemovedQuickSearchTerms();
-}
-
-function restoreQuickSearchTerm(term) {
-  const key = persistedTermKey(term);
-  if (!key || !removedQuickSearchTerms.has(key)) return false;
-  removedQuickSearchTerms.delete(key);
-  persistRemovedQuickSearchTerms();
-  return true;
-}
-
 function isSearchResultHidden(key) {
   return key ? hiddenSearchResultKeys.has(key) : false;
 }
@@ -140,86 +102,6 @@ function buildHiddenResultKey({ remoteId, lat, lon, title }) {
 }
 
 loadHiddenSearchResults();
-
-const normalizeQuickSearchTerm = term =>
-  (term || '')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-function isDefaultQuickSearch(term) {
-  if (!term) return false;
-  const normalized = term.toLowerCase();
-  return DEFAULT_QUICK_SEARCHES.some(defaultTerm => defaultTerm.toLowerCase() === normalized);
-}
-
-function loadQuickSearchTerms() {
-  if (typeof localStorage === 'undefined') {
-    quickSearchTerms = DEFAULT_QUICK_SEARCHES.slice();
-    return;
-  }
-  loadRemovedQuickSearchTerms();
-  try {
-    const stored = localStorage.getItem(QUICK_SEARCHES_KEY);
-    let combined = [];
-    DEFAULT_QUICK_SEARCHES.forEach(defaultTerm => {
-      const normalized = normalizeQuickSearchTerm(defaultTerm);
-      if (!normalized) return;
-      if (isQuickSearchTermRemoved(normalized)) return;
-      combined.push(normalized);
-    });
-    if (stored) {
-      const parsed = JSON.parse(stored);
-      if (Array.isArray(parsed)) {
-        combined = combined.concat(parsed);
-      }
-    }
-    const seen = new Set();
-    quickSearchTerms = combined
-      .map(normalizeQuickSearchTerm)
-      .filter(Boolean)
-      .filter(term => !isQuickSearchTermRemoved(term))
-      .filter(term => {
-        const key = term.toLowerCase();
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
-  } catch {
-    quickSearchTerms = DEFAULT_QUICK_SEARCHES.slice();
-  }
-}
-
-function persistQuickSearchTerms() {
-  if (typeof localStorage === 'undefined') return;
-  try {
-    const customTerms = quickSearchTerms.filter(term => !isDefaultQuickSearch(term));
-    localStorage.setItem(QUICK_SEARCHES_KEY, JSON.stringify(customTerms));
-  } catch {
-    // ignore persistence failures
-  }
-}
-
-function addQuickSearchTerm(term) {
-  const normalized = normalizeQuickSearchTerm(term);
-  if (!normalized) return false;
-  const exists = quickSearchTerms.some(t => t.toLowerCase() === normalized.toLowerCase());
-  if (exists) return false;
-  quickSearchTerms.push(normalized);
-  restoreQuickSearchTerm(normalized);
-  persistQuickSearchTerms();
-  return true;
-}
-
-function removeQuickSearchTerm(term) {
-  if (!term) return false;
-  const normalized = term.toLowerCase();
-  const nextTerms = quickSearchTerms.filter(t => t.toLowerCase() !== normalized);
-  if (nextTerms.length === quickSearchTerms.length) return false;
-  quickSearchTerms = nextTerms;
-  persistQuickSearchTerms();
-  markQuickSearchTermRemoved(term);
-  return true;
-}
 
 const AI_KEY_STORAGE = 'travelOpenAiKey';
 const AI_SUMMARY_STORAGE = 'travelAiSummaries';
@@ -650,6 +532,41 @@ const OVERPASS_CATEGORY_CONFIGS = [
     filter: '["leisure"="park"]',
     label: 'Park',
     matcher: term => /\b(?:park|parks)\b/.test(term)
+  },
+  {
+    filter: '["amenity"="cafe"]',
+    label: 'Cafe',
+    matcher: term => /\b(?:cafe|cafes|café|coffee|espresso)\b/.test(term)
+  },
+  {
+    filter: '["amenity"="bar"]',
+    label: 'Bar',
+    matcher: term => /\b(?:bar|bars|pub|brewery|taproom)\b/.test(term)
+  },
+  {
+    filter: '["shop"="supermarket"]',
+    label: 'Supermarket',
+    matcher: term => /\b(?:grocery|groceries|supermarket|market)\b/.test(term)
+  },
+  {
+    filter: '["amenity"="pharmacy"]',
+    label: 'Pharmacy',
+    matcher: term => /\b(?:pharmacy|pharmacies|drugstore|drug store)\b/.test(term)
+  },
+  {
+    filter: '["tourism"="museum"]',
+    label: 'Museum',
+    matcher: term => /\b(?:museum|museums|gallery|galleries)\b/.test(term)
+  },
+  {
+    filter: '["amenity"="fuel"]',
+    label: 'Gas station',
+    matcher: term => /\b(?:gas|fuel|petrol|gas station|gasoline)\b/.test(term)
+  },
+  {
+    filter: '["tourism"="hotel"]',
+    label: 'Hotel',
+    matcher: term => /\b(?:hotel|hotels|motel|hostel|lodging)\b/.test(term)
   }
 ];
 
@@ -668,6 +585,20 @@ function buildOverpassBounds(bounds) {
   const north = bounds.getNorth().toFixed(6);
   const east = bounds.getEast().toFixed(6);
   return `${south},${west},${north},${east}`;
+}
+
+const stripDiacritics = text =>
+  (text || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+const normalizeForMatch = text => stripDiacritics((text || '').toLowerCase());
+
+function buildPhotonBounds(bounds) {
+  if (!bounds || typeof bounds.getSouth !== 'function') return null;
+  const south = bounds.getSouth().toFixed(6);
+  const west = bounds.getWest().toFixed(6);
+  const north = bounds.getNorth().toFixed(6);
+  const east = bounds.getEast().toFixed(6);
+  return `${west},${south},${east},${north}`;
 }
 
 async function fetchOverpassPlaces(config, bounds) {
@@ -729,6 +660,55 @@ async function fetchOverpassPlaces(config, bounds) {
     })
     .filter(Boolean)
     .slice(0, 25);
+}
+
+async function fetchPhotonPlaces(term, bounds) {
+  const bbox = buildPhotonBounds(bounds);
+  const url = new URL(PHOTON_ENDPOINT);
+  url.searchParams.set('q', term);
+  url.searchParams.set('limit', PHOTON_RESULT_LIMIT);
+  url.searchParams.set('lang', 'en');
+  if (bbox) {
+    url.searchParams.set('bbox', bbox);
+  }
+  const resp = await fetch(url.toString());
+  if (!resp.ok) return [];
+  const data = await resp.json();
+  if (!Array.isArray(data?.features)) return [];
+  return data.features
+    .map(feature => {
+      const coords = Array.isArray(feature?.geometry?.coordinates)
+        ? feature.geometry.coordinates
+        : [];
+      const lon = Number(coords[0]);
+      const lat = Number(coords[1]);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+      const props = feature.properties || {};
+      const title = (props.name || props.street || '').trim();
+      const subtitleParts = [
+        props.city,
+        props.state,
+        props.country,
+        props.street,
+        props.postcode
+      ].filter(Boolean);
+      const subtitle = subtitleParts.join(', ');
+      const remoteId = props.osm_id ? `photon:${props.osm_id}` : '';
+      return {
+        title: title || subtitle || 'Search result',
+        subtitle,
+        lat,
+        lon,
+        importance: Number(props.importance) || 0,
+        hiddenKey: buildHiddenResultKey({
+          remoteId,
+          lat,
+          lon,
+          title
+        })
+      };
+    })
+    .filter(Boolean);
 }
 
 function haversine(lat1, lon1, lat2, lon2) {
@@ -993,14 +973,22 @@ function createSearchResultListItem(
 
   const title = document.createElement('div');
   title.className = 'search-result-card__title';
-  title.textContent = result.title || 'Search result';
+  if (result.highlightedTitle) {
+    title.innerHTML = result.highlightedTitle;
+  } else {
+    title.textContent = result.title || 'Search result';
+  }
   li.append(title);
 
   const subtitleText = result.subtitle || result.description;
   if (subtitleText) {
     const subtitle = document.createElement('div');
     subtitle.className = 'search-result-card__subtitle';
-    subtitle.textContent = subtitleText;
+    if (result.highlightedSubtitle) {
+      subtitle.innerHTML = result.highlightedSubtitle;
+    } else {
+      subtitle.textContent = subtitleText;
+    }
     li.append(subtitle);
   }
 
@@ -1347,13 +1335,25 @@ function renderPlacemarkDetails(place) {
     editBtn.type = 'button';
     editBtn.className = 'placemark-details__edit-btn';
     editBtn.textContent = 'Edit place';
+    const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.className = 'placemark-details__delete-btn';
+    deleteBtn.textContent = 'Delete';
+    deleteBtn.addEventListener('click', async e => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!confirm('Delete this place?')) return;
+      await deletePlace(place);
+      placemarkDetailsEl.innerHTML = '';
+      renderPlacemarkOverview();
+    });
     editBtn.addEventListener('click', e => {
       e.preventDefault();
       e.stopPropagation();
       detailsEditState = { place, editing: true };
       renderPlacemarkDetails(place);
     });
-    actions.append(editBtn);
+    actions.append(editBtn, deleteBtn);
   }
 
   if (hasCoords) {
@@ -1425,9 +1425,6 @@ export async function initTravelPanel() {
   const placeInput = document.getElementById('placeSearch');
   const resultsList = document.getElementById('placeResults');
   const searchPlaceBtn = document.getElementById('placeSearchBtn');
-  const quickSearchContainer = document.getElementById('quickSearches');
-  const quickSearchForm = document.getElementById('quickSearchForm');
-  const quickSearchInput = document.getElementById('quickSearchInput');
   const placeSearchStatusEl = document.getElementById('placeSearchStatus');
   const sortByProximityBtn = document.getElementById('sortByProximityBtn');
   const tagFiltersDiv = document.getElementById('travelTagFilters');
@@ -2410,6 +2407,49 @@ export async function initTravelPanel() {
     });
   };
 
+  const escapeHtml = text =>
+    (text || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+
+  const expandWordVariants = word => {
+    const normalized = normalizeForMatch(word);
+    const synonyms = SEARCH_SYNONYM_MAP.get(normalized) || [];
+    const normalizedSynonyms = synonyms.map(normalizeForMatch);
+    return {
+      variants: Array.from(new Set([normalized, ...normalizedSynonyms])),
+      highlights: Array.from(new Set([word, ...synonyms]))
+    };
+  };
+
+  const highlightMatch = (text, words) => {
+    if (!text) return '';
+    if (!Array.isArray(words) || !words.length) return escapeHtml(text);
+    const pattern = words
+      .map(word => word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+      .join('|');
+    if (!pattern) return escapeHtml(text);
+    const regex = new RegExp(`(${pattern})`, 'ig');
+    return escapeHtml(text).replace(regex, '<mark>$1</mark>');
+  };
+
+  const dedupeResults = results => {
+    const seen = new Set();
+    return results.filter(result => {
+      const lat = Number(result?.lat);
+      const lon = Number(result?.lon);
+      const title = (result?.title || '').toLowerCase().trim();
+      if (!Number.isFinite(lat) || !Number.isFinite(lon) || !title) return false;
+      const key = `${lat.toFixed(5)}:${lon.toFixed(5)}:${title}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  };
+
   const searchForPlace = async (termOverride = null, options = {}) => {
     const providedTerm = termOverride ?? placeInput?.value ?? '';
     const term = providedTerm.trim();
@@ -2454,14 +2494,22 @@ export async function initTravelPanel() {
       resultsList.append(header);
     };
 
-    const normalizedTerm = term.toLowerCase();
+    const normalizedTerm = normalizeForMatch(term);
     const searchWords = normalizedTerm.split(/\s+/).filter(Boolean);
-    const matchesSearchWords = text =>
-      searchWords.length > 0 &&
-      searchWords.every(word => text.includes(word));
+    const expandedWordGroups = searchWords.map(expandWordVariants);
+    const highlightTerms = Array.from(
+      new Set(expandedWordGroups.flatMap(group => group.highlights))
+    );
+    const matchesSearchWords = text => {
+      const haystack = normalizeForMatch(text);
+      if (!expandedWordGroups.length) return false;
+      return expandedWordGroups.every(group =>
+        group.variants.some(word => haystack.includes(word))
+      );
+    };
 
     const existingMatches = travelData.filter(place => {
-      const haystack = `${place.name || ''} ${place.description || ''}`.toLowerCase();
+      const haystack = `${place.name || ''} ${place.description || ''}`;
       return matchesSearchWords(haystack);
     });
 
@@ -2469,8 +2517,8 @@ export async function initTravelPanel() {
       appendSectionHeader('Saved places');
     }
 
-      existingMatches.forEach(p => {
-        registerResultLatLng(p.lat, p.lon, 'saved');
+    existingMatches.forEach(p => {
+      registerResultLatLng(p.lat, p.lon, 'saved');
       let card;
       const config = {
         variant: 'existing',
@@ -2567,46 +2615,96 @@ export async function initTravelPanel() {
       applyResultFocus();
       return;
     }
-
     try {
-      let placeSummaries = await queryNominatimForTerm(term, viewboxParams);
-      let boundsForCategorySearch = bounds;
-      if (!placeSummaries.length && viewboxParams && bounds?.pad) {
-        setSearchStatus('No results within the current view; expanding area…', true);
-        const expandedBounds = bounds.pad(2);
-        const expandedViewbox = buildViewboxParams(expandedBounds);
-        if (expandedViewbox) {
-          placeSummaries = await queryNominatimForTerm(term, expandedViewbox);
-          boundsForCategorySearch = expandedBounds;
-        }
-      }
+      const cacheKey = `${normalizedTerm}::${viewboxParams || 'global'}`;
+      const cached = searchCache.get(cacheKey);
+      let placeSummaries = cached ? cached.map(r => ({ ...r })) : [];
+      const center = bounds?.getCenter?.();
 
-      const overpassConfig = getOverpassCategoryConfig(normalizedTerm);
-      if (overpassConfig && boundsForCategorySearch) {
-        try {
-          const overpassResults = await fetchOverpassPlaces(overpassConfig, boundsForCategorySearch);
-          overpassResults.forEach(extra => {
-            if (!extra || isSearchResultHidden(extra.hiddenKey)) return;
-            placeSummaries.push(extra);
-          });
-        } catch (overpassErr) {
-          console.warn('Overpass search failed', overpassErr);
+      if (!cached) {
+        const photonResults = await fetchPhotonPlaces(term, bounds);
+        photonResults.forEach(result => {
+          if (!result || isSearchResultHidden(result.hiddenKey)) return;
+          placeSummaries.push(result);
+        });
+
+        let boundsForCategorySearch = bounds;
+        if (!placeSummaries.length && viewboxParams && bounds?.pad) {
+          setSearchStatus('No results within the current view; expanding area…', true);
+          const expandedBounds = bounds.pad(2);
+          const expandedViewbox = buildViewboxParams(expandedBounds);
+          if (expandedViewbox) {
+            placeSummaries = placeSummaries.concat(
+              await queryNominatimForTerm(term, expandedViewbox)
+            );
+            boundsForCategorySearch = expandedBounds;
+          }
+        } else {
+          placeSummaries = placeSummaries.concat(await queryNominatimForTerm(term, viewboxParams));
         }
+
+        const overpassConfig = getOverpassCategoryConfig(normalizedTerm);
+        if (overpassConfig && boundsForCategorySearch) {
+          try {
+            const overpassResults = await fetchOverpassPlaces(overpassConfig, boundsForCategorySearch);
+            overpassResults.forEach(extra => {
+              if (!extra || isSearchResultHidden(extra.hiddenKey)) return;
+              placeSummaries.push(extra);
+            });
+          } catch (overpassErr) {
+            console.warn('Overpass search failed', overpassErr);
+          }
+        }
+
+        searchCache.set(cacheKey, placeSummaries.map(r => ({ ...r })));
       }
 
       const matchesSummary = summary => {
         const titleText = `${summary.title || ''} ${summary.subtitle || ''}`.toLowerCase();
         return matchesSearchWords(titleText);
       };
-      let filteredSummaries = placeSummaries.filter(matchesSummary);
+      let filteredSummaries = dedupeResults(placeSummaries).filter(matchesSummary);
       if (!filteredSummaries.length && !existingMatches.length) {
         setSearchStatus(`No nearby results for "${term}"; searching worldwide…`, true);
         const globalResults = await queryNominatimForTerm(term);
-        filteredSummaries = globalResults.filter(matchesSummary);
+        filteredSummaries = dedupeResults(globalResults).filter(matchesSummary);
         if (filteredSummaries.length) {
           setSearchStatus(`Showing best worldwide match for "${term}".`, true);
         }
       }
+
+      const scoreResult = summary => {
+        let score = Number(summary.importance) || 0;
+        const lat = Number(summary.lat);
+        const lon = Number(summary.lon);
+        if (center && Number.isFinite(lat) && Number.isFinite(lon)) {
+          const dist = haversine(center.lat, center.lng, lat, lon);
+          if (Number.isFinite(dist)) {
+            score += 1 / (1 + dist / 2); // closer gets bigger boost
+          }
+        }
+        if (matchesSummary(summary)) {
+          score += 0.5;
+        }
+        return score;
+      };
+
+      filteredSummaries = filteredSummaries
+        .map(summary => ({
+          ...summary,
+          score: scoreResult(summary),
+          highlightedTitle: highlightMatch(summary.title || '', highlightTerms),
+          highlightedSubtitle: highlightMatch(summary.subtitle || summary.description || '', highlightTerms),
+          hiddenKey:
+            summary.hiddenKey ||
+            buildHiddenResultKey({
+              remoteId: summary.remoteId,
+              lat: summary.lat,
+              lon: summary.lon,
+              title: summary.title
+            })
+        }))
+        .sort((a, b) => b.score - a.score);
 
       if (filteredSummaries.length) {
         appendSectionHeader(existingMatches.length ? 'Other results' : 'Search results');
@@ -2662,6 +2760,8 @@ export async function initTravelPanel() {
             {
               title: placeSummary.title,
               subtitle: placeSummary.subtitle || '',
+              highlightedTitle: placeSummary.highlightedTitle,
+              highlightedSubtitle: placeSummary.highlightedSubtitle,
               lat: latitude,
               lon: longitude,
             },
@@ -2717,61 +2817,10 @@ export async function initTravelPanel() {
     searchForPlace();
   });
 
-  const handleQuickSearch = term => {
-    const normalized = normalizeQuickSearchTerm(term);
-    if (!normalized) return;
-    if (placeInput) {
-      placeInput.value = normalized;
-    }
-    const bounds = map?.getBounds?.();
-    searchForPlace(normalized, { bounds });
-  };
-
-  const renderQuickSearches = () => {
-    if (!quickSearchContainer) return;
-    quickSearchContainer.innerHTML = '';
-    if (!quickSearchTerms.length) {
-      const empty = document.createElement('div');
-      empty.className = 'placemark-overview__empty';
-      empty.textContent = 'No saved categories yet.';
-      quickSearchContainer.appendChild(empty);
-      return;
-    }
-    quickSearchTerms.forEach(term => {
-      const pill = document.createElement('span');
-      pill.className = 'quick-search-pill';
-      const searchBtn = document.createElement('button');
-      searchBtn.type = 'button';
-      searchBtn.className = 'quick-search-link';
-      searchBtn.textContent = term;
-      searchBtn.addEventListener('click', () => handleQuickSearch(term));
-      pill.appendChild(searchBtn);
-      const removeBtn = document.createElement('button');
-      removeBtn.type = 'button';
-      removeBtn.className = 'quick-search-link__remove';
-      removeBtn.setAttribute('aria-label', `Remove ${term}`);
-      removeBtn.textContent = '×';
-      removeBtn.addEventListener('click', () => {
-        removeQuickSearchTerm(term);
-        renderQuickSearches();
-      });
-      pill.appendChild(removeBtn);
-      quickSearchContainer.appendChild(pill);
-    });
-  };
-
-  renderQuickSearches();
-
-  quickSearchForm?.addEventListener('submit', e => {
-    e.preventDefault();
-    const value = quickSearchInput?.value || '';
-    const added = addQuickSearchTerm(value);
-    if (added) {
-      renderQuickSearches();
-    }
-    if (quickSearchInput) {
-      quickSearchInput.value = '';
-    }
+  const debouncedTypeaheadSearch = debounce(() => searchForPlace(), 350);
+  placeInput?.addEventListener('input', () => {
+    if (placeInput.value.trim().length < 2) return;
+    debouncedTypeaheadSearch();
   });
 
   sortByProximityBtn?.addEventListener('click', () => {

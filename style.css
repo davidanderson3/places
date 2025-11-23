@@ -347,10 +347,6 @@ button:hover {
   background-color: #5a95f5;
 }
 
-.quick-search-link {
-  margin-top: 0;
-}
-
 
 /* ------------------------------
    Layout and Rows
@@ -1487,76 +1483,6 @@ h2 {
 
 .travel-table-controls {
   display: none !important;
-}
-
-.quick-searches {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin: 0;
-}
-
-.quick-search-manager {
-  margin-top: 6px;
-  display: flex;
-  flex-direction: column;
-  border: 1px solid #d4dae4;
-  border-radius: 14px;
-  padding: 10px 14px;
-  background: #fff;
-  gap: 8px;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.04);
-}
-
-.quick-search-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 8px;
-  background: #eef6ff;
-  border-radius: 16px;
-  border: 1px solid #c8dcff;
-}
-
-.quick-search-link {
-  background: none;
-  border: none;
-  color: #0066cc;
-  font-weight: 600;
-  cursor: pointer;
-  padding: 0;
-}
-
-.quick-search-link:hover,
-.quick-search-link:focus-visible {
-  text-decoration: underline;
-}
-
-.quick-search-link__remove {
-  border: none;
-  background: transparent;
-  color: #888;
-  cursor: pointer;
-  font-size: 0.9rem;
-  line-height: 1;
-  padding: 0;
-  appearance: none;
-}
-
-.quick-search-link__remove:hover,
-.quick-search-link__remove:focus-visible {
-  color: #333;
-  background: transparent;
-}
-
-.quick-search-form {
-  display: flex;
-  gap: 6px;
-  margin-bottom: 10px;
-}
-
-.quick-search-form input {
-  flex: 1 1 auto;
 }
 
 .travel-search-result-icon {
