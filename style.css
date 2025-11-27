@@ -1724,6 +1724,15 @@ h2 {
   margin-bottom: 8px;
 }
 
+.placemark-details__card {
+  background: #ffffff;
+  border: 1px solid #d7dde5;
+  border-radius: 10px;
+  padding: 12px 14px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.06);
+  margin-bottom: 14px;
+}
+
 .placemark-details__back {
   background: none;
   border: none;
@@ -1751,11 +1760,13 @@ h2 {
 }
 
 .placemark-details__tag {
-  background: #eef2f7;
+  background: linear-gradient(135deg, #fdfefe 0%, #e7edf6 100%);
   border-radius: 12px;
   padding: 4px 10px;
   font-size: 0.85rem;
-  color: #3a4a5a;
+  color: #2f3b4c;
+  border: 1px solid #d7e0ec;
+  box-shadow: 0 1px 2px rgba(18, 50, 94, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.8);
 }
 
 .placemark-details__list {
@@ -1996,9 +2007,10 @@ h2 {
 
 .placemark-details__actions {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 8px;
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
   margin-top: 12px;
 }
 
@@ -2014,6 +2026,9 @@ h2 {
   border-radius: 4px;
   font-weight: 600;
   cursor: pointer;
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
 }
 
 .placemark-details__form-actions {
@@ -2032,6 +2047,9 @@ h2 {
   border-radius: 4px;
   cursor: pointer;
   font-weight: 600;
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
 }
 
 .placemark-details__delete-btn:hover {
@@ -2388,20 +2406,28 @@ h2 {
 
 /* Tag filter buttons */
 .tag-filter-button {
-  background: #eee;
-  border: 1px solid #ccc;
-  color: #333;
-  padding: 2px 6px;
-  border-radius: 4px;
+  background: linear-gradient(135deg, #fdfefe 0%, #e6eef8 100%);
+  border: 1px solid #cdd9e7;
+  color: #2f3b4c;
+  padding: 4px 8px;
+  border-radius: 6px;
   cursor: pointer;
-  margin: 0 0 4px 0;
-  font-size: 0.8rem;
+  margin: 0 0 6px 0;
+  font-size: 0.85rem;
+  box-shadow: 0 1px 2px rgba(18, 50, 94, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.85);
+  transition: transform 0.1s ease, box-shadow 0.15s ease, border-color 0.15s ease;
 }
 
 .tag-filter-button.active {
-  background: #7aa68c;
+  background: linear-gradient(135deg, #1f73b7 0%, #2f8fd8 100%);
   color: #fff;
-  border-color: #7aa68c;
+  border-color: #1f73b7;
+  box-shadow: 0 2px 6px rgba(31, 115, 183, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+
+.tag-filter-button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 6px rgba(18, 50, 94, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.9);
 }
 
 /* Place search results list */

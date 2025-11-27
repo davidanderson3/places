@@ -39,16 +39,7 @@ function storageKey() {
 
 let hiddenSearchResultKeys = new Set();
 let activeContextRefresh = null;
-let summaryRequestCounter = 0;
-const summaryCache = new Map();
 const searchCache = new Map();
-const debounce = (fn, delay = 250) => {
-  let handle = null;
-  return (...args) => {
-    clearTimeout(handle);
-    handle = setTimeout(() => fn(...args), delay);
-  };
-};
 function loadHiddenSearchResults() {
   if (typeof localStorage === 'undefined') {
     hiddenSearchResultKeys = new Set();
@@ -246,11 +237,13 @@ async function fetchOpenAiSummary({ title, subtitle }) {
   return outputText;
 }
 
-function renderAiSummarySection(el, { title, subtitle }) {
+function renderAiSummarySection(el, { title, subtitle, onApply } = {}) {
   if (!el) return;
-  const placeName = (title || 'this place').trim();
-  const summaryKey = buildAiSummaryKey(title, subtitle);
-  const cached = summaryKey ? aiSummaries.get(summaryKey) || '' : '';
+  const resolve = value => (typeof value === 'function' ? value() : value || '');
+  const initialTitle = resolve(title) || 'this place';
+  const initialSubtitle = resolve(subtitle) || '';
+  const initialKey = buildAiSummaryKey(initialTitle, initialSubtitle);
+  const cached = initialKey ? aiSummaries.get(initialKey) || '' : '';
 
   el.innerHTML = '';
 
@@ -304,7 +297,7 @@ function renderAiSummarySection(el, { title, subtitle }) {
       if (!trimmed) return;
       openAiKey = trimmed;
       persistOpenAiKey(trimmed);
-      renderAiSummarySection(el, { title: placeName, subtitle });
+      renderAiSummarySection(el, { title, subtitle, onApply });
     });
     keyActions.append(saveKeyBtn, keyStatus);
     keyRow.appendChild(keyActions);
@@ -312,14 +305,36 @@ function renderAiSummarySection(el, { title, subtitle }) {
   }
 
   let resultEl = null;
+  let resultTextEl = null;
+  let applyBtn = null;
   const ensureResultEl = text => {
     if (!resultEl) {
       resultEl = document.createElement('div');
       resultEl.className = 'ai-summary__result';
+      resultTextEl = document.createElement('div');
+      resultTextEl.className = 'ai-summary__result-text';
+      resultEl.appendChild(resultTextEl);
+      if (typeof onApply === 'function') {
+        applyBtn = document.createElement('button');
+        applyBtn.type = 'button';
+        applyBtn.textContent = 'Use for description';
+        applyBtn.className = 'ai-summary__apply';
+        applyBtn.disabled = true;
+        applyBtn.addEventListener('click', () => {
+          const textToApply = resultTextEl?.textContent?.trim();
+          if (textToApply) {
+            onApply(textToApply);
+          }
+        });
+        resultEl.appendChild(applyBtn);
+      }
       el.appendChild(resultEl);
     }
     if (text !== undefined) {
-      resultEl.textContent = text;
+      resultTextEl.textContent = text;
+      if (applyBtn) {
+        applyBtn.disabled = !text;
+      }
     }
   };
   if (cached) {
@@ -341,10 +356,16 @@ function renderAiSummarySection(el, { title, subtitle }) {
     generateBtn.disabled = true;
     showSpinner();
     try {
-      const text = await fetchOpenAiSummary({ title: placeName, subtitle });
+      const resolvedTitle = resolve(title) || 'this place';
+      const resolvedSubtitle = resolve(subtitle) || '';
+      const summaryKey = buildAiSummaryKey(resolvedTitle, resolvedSubtitle);
+      const text = await fetchOpenAiSummary({ title: resolvedTitle, subtitle: resolvedSubtitle });
       ensureResultEl(text);
       if (summaryKey) {
         setAiSummaryForKey(summaryKey, text);
+      }
+      if (typeof onApply === 'function') {
+        onApply(text);
       }
     } catch (err) {
       const message = err?.message || 'Failed to fetch summary.';
@@ -379,6 +400,7 @@ let map;
 let markers = [];
 let travelData = [];
 let currentSearch = '';
+let activeSearchToken = 0;
 let rowMarkerMap = new Map();
 let markerRowMap = new Map();
 let selectedRow = null;
@@ -401,6 +423,9 @@ let tableBody = null;
 let selectedPlaceRef = null;
 let detailsEditState = { place: null, editing: false };
 let savePlaceEdits = null;
+let deletePlace = async () => {
+  console.warn('Delete place is not available until initialization completes.');
+};
 let searchResultsListEl = null;
 
 function updateMobilePlacemarkListState() {
@@ -769,18 +794,26 @@ function getVisibleMarkersSnapshot() {
     const bounds = map.getBounds();
     visibleMarkers = activeMarkers.filter(marker => bounds.contains(marker.getLatLng()));
   }
-  const canUseProximitySort =
-    Array.isArray(userCoords) &&
+  const mapCenter = map?.getCenter?.();
+  const refPoint = Array.isArray(userCoords) &&
     Number.isFinite(userCoords[0]) &&
-    Number.isFinite(userCoords[1]);
+    Number.isFinite(userCoords[1])
+    ? { lat: userCoords[0], lon: userCoords[1] }
+    : mapCenter && Number.isFinite(mapCenter.lat) && Number.isFinite(mapCenter.lng)
+      ? { lat: mapCenter.lat, lon: mapCenter.lng }
+      : null;
+  const canUseProximitySort =
+    refPoint &&
+    Number.isFinite(refPoint.lat) &&
+    Number.isFinite(refPoint.lon);
   visibleMarkers = visibleMarkers.slice().sort((a, b) => {
     const hasCoords = marker =>
       marker?.place &&
       Number.isFinite(marker.place.lat) &&
       Number.isFinite(marker.place.lon);
     if (canUseProximitySort && hasCoords(a) && hasCoords(b)) {
-      const distA = haversine(userCoords[0], userCoords[1], a.place.lat, a.place.lon);
-      const distB = haversine(userCoords[0], userCoords[1], b.place.lat, b.place.lon);
+      const distA = haversine(refPoint.lat, refPoint.lon, a.place.lat, a.place.lon);
+      const distB = haversine(refPoint.lat, refPoint.lon, b.place.lat, b.place.lon);
       if (Number.isFinite(distA) && Number.isFinite(distB)) {
         if (Math.abs(distA - distB) < 1e-6) {
           return (a.place.name || '').localeCompare(b.place.name || '');
@@ -923,14 +956,6 @@ function renderSearchResultDetails(result, { onAdd } = {}) {
       addBtn.addEventListener('click', () => onAdd());
       actions.append(addBtn);
     }
-
-    const summarySection = document.createElement('div');
-    summarySection.className = 'placemark-summary';
-    placemarkDetailsEl.appendChild(summarySection);
-    renderAiSummarySection(summarySection, {
-      title: result.title || '',
-      subtitle: result.description || result.subtitle || ''
-    });
 
     if (actions.childElementCount > 0) {
       placemarkDetailsEl.appendChild(actions);
@@ -1093,16 +1118,20 @@ function renderPlacemarkDetails(place) {
   const editing = detailsEditState.editing && detailsEditState.place === place;
   placemarkDetailsEl.innerHTML = '';
 
+  const placeCard = document.createElement('div');
+  placeCard.className = 'placemark-details__card';
+  placemarkDetailsEl.appendChild(placeCard);
+
   const title = document.createElement('div');
   title.className = 'placemark-details__title';
   title.textContent = place.name || 'Untitled place';
-  placemarkDetailsEl.appendChild(title);
+  placeCard.appendChild(title);
 
   if (place.description) {
     const desc = document.createElement('div');
     desc.className = 'placemark-details__description';
     desc.innerHTML = linkify(place.description);
-    placemarkDetailsEl.appendChild(desc);
+    placeCard.appendChild(desc);
   }
 
   const hasTags = Array.isArray(place.tags) && place.tags.length;
@@ -1177,27 +1206,18 @@ function renderPlacemarkDetails(place) {
   }
 
   if (infoList.childElementCount) {
-    placemarkDetailsEl.appendChild(infoList);
+    placeCard.appendChild(infoList);
   }
 
   if (visitedToggleEl) {
-    placemarkDetailsEl.appendChild(visitedToggleEl);
+    placeCard.appendChild(visitedToggleEl);
   }
 
   if (!editing && tagsSection) {
-    placemarkDetailsEl.appendChild(tagsSection);
+    placeCard.appendChild(tagsSection);
   }
 
-  let summarySection = null;
-  if (!editing) {
-    summarySection = document.createElement('div');
-    summarySection.className = 'placemark-summary';
-    placemarkDetailsEl.appendChild(summarySection);
-    renderAiSummarySection(summarySection, {
-      title: place.name || '',
-      subtitle: buildPlaceLocationHint(place)
-    });
-  } else {
+  if (editing) {
     setContextRefresh(null);
   }
 
@@ -1229,6 +1249,35 @@ function renderPlacemarkDetails(place) {
     descInput.value = place.description || '';
     descInput.rows = 3;
     form.append(makeField('Description', descInput));
+
+    const aiHelperSection = document.createElement('div');
+    aiHelperSection.className = 'placemark-details__ai-section';
+    const aiHelperLabel = document.createElement('div');
+    aiHelperLabel.className = 'placemark-details__ai-label';
+    aiHelperLabel.textContent = 'Need a description?';
+    aiHelperSection.appendChild(aiHelperLabel);
+    const aiHelperBody = document.createElement('div');
+    aiHelperBody.className = 'placemark-details__ai-body';
+    aiHelperSection.appendChild(aiHelperBody);
+    const subtitle = () => {
+      const parts = [];
+      if (Array.isArray(place.tags) && place.tags.length) {
+        parts.push(place.tags.join(', '));
+      }
+      if (Number.isFinite(place.lat) && Number.isFinite(place.lon)) {
+        parts.push(`${place.lat}, ${place.lon}`);
+      }
+      return parts.join(' • ');
+    };
+    renderAiSummarySection(aiHelperBody, {
+      title: () => nameInput.value.trim() || place.name || '',
+      subtitle,
+      onApply: text => {
+        descInput.value = text;
+        descInput.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    });
+    form.append(aiHelperSection);
 
     const tagsInput = document.createElement('input');
     tagsInput.type = 'text';
@@ -1329,7 +1378,7 @@ function renderPlacemarkDetails(place) {
       renderPlacemarkDetails(place);
     });
 
-    placemarkDetailsEl.appendChild(form);
+    placeCard.appendChild(form);
   } else {
     const editBtn = document.createElement('button');
     editBtn.type = 'button';
@@ -1384,7 +1433,7 @@ function renderPlacemarkDetails(place) {
   }
 
   if (actions.childElementCount > 0) {
-    placemarkDetailsEl.appendChild(actions);
+    placeCard.appendChild(actions);
   }
 
   if (!editing) {
@@ -2145,7 +2194,7 @@ export async function initTravelPanel() {
     renderList(currentSearch);
   }
 
-  async function deletePlace(p) {
+  deletePlace = async function deletePlace(p) {
     const user = getCurrentUser?.();
     if (user && p.id) {
       if (initialRemoteLoadComplete) {
@@ -2451,6 +2500,8 @@ export async function initTravelPanel() {
   };
 
   const searchForPlace = async (termOverride = null, options = {}) => {
+    const token = ++activeSearchToken;
+    const isStale = () => token !== activeSearchToken;
     const providedTerm = termOverride ?? placeInput?.value ?? '';
     const term = providedTerm.trim();
     if (!term) return;
@@ -2463,6 +2514,7 @@ export async function initTravelPanel() {
     const viewboxParams = buildViewboxParams(bounds);
 
     setSearchStatus(`Searching for "${term}"…`, true);
+    if (isStale()) return;
 
     const searchResultLatLngs = [];
     const savedMatchLatLngs = [];
@@ -2512,48 +2564,49 @@ export async function initTravelPanel() {
       const haystack = `${place.name || ''} ${place.description || ''}`;
       return matchesSearchWords(haystack);
     });
+    existingMatches.forEach(p => registerResultLatLng(p.lat, p.lon, 'saved'));
+    let savedAppended = false;
 
-    if (existingMatches.length) {
+    const appendSavedMatches = () => {
+      if (!existingMatches.length || savedAppended) return;
+      savedAppended = true;
       appendSectionHeader('Saved places');
-    }
-
-    existingMatches.forEach(p => {
-      registerResultLatLng(p.lat, p.lon, 'saved');
-      let card;
-      const config = {
-        variant: 'existing',
-        onFocus: () => {
-          const marker = p.marker;
-          if (marker) {
-            const row = markerRowMap.get(marker);
-            if (row) {
-              bringRowToTop(row);
+      existingMatches.forEach(p => {
+        let card;
+        const config = {
+          variant: 'existing',
+          onFocus: () => {
+            const marker = p.marker;
+            if (marker) {
+              const row = markerRowMap.get(marker);
+              if (row) {
+                bringRowToTop(row);
+              } else {
+                setActiveMarker(marker, { panToMarker: true });
+              }
             } else {
-              setActiveMarker(marker, { panToMarker: true });
+              map.setView([p.lat, p.lon], 14);
+              renderPlacemarkDetails(p);
             }
-          } else {
-            map.setView([p.lat, p.lon], 14);
-            renderPlacemarkDetails(p);
-          }
-          highlightSearchResultCard(card);
-        },
-      };
-      card = createSearchResultListItem(
-        {
-          title: p.name || 'Untitled place',
-          subtitle: p.description || '',
-          lat: p.lat,
-          lon: p.lon,
-        },
-        config
-      );
-      resultsList?.append(card);
-    });
-
-    updateMobilePlacemarkListState();
+            highlightSearchResultCard(card);
+          },
+        };
+        card = createSearchResultListItem(
+          {
+            title: p.name || 'Untitled place',
+            subtitle: p.description || '',
+            lat: p.lat,
+            lon: p.lon,
+          },
+          config
+        );
+        resultsList?.append(card);
+      });
+    };
 
     const coords = parseCoordinates(term);
     if (coords) {
+      if (isStale()) return;
       const { lat, lon } = coords;
       registerResultLatLng(lat, lon);
       let card;
@@ -2589,9 +2642,11 @@ export async function initTravelPanel() {
         },
         config
       );
+      if (isStale()) return;
       resultsList?.append(card);
       updateMobilePlacemarkListState();
       const showDetails = () => {
+        if (isStale()) return;
         renderSearchResultDetails(
           {
             title: 'Searched location',
@@ -2611,8 +2666,11 @@ export async function initTravelPanel() {
       });
       map.setView([lat, lon], 14);
       showDetails();
+      if (isStale()) return;
       setSearchStatus('', false);
+      appendSavedMatches();
       applyResultFocus();
+      updateMobilePlacemarkListState();
       return;
     }
     try {
@@ -2622,6 +2680,7 @@ export async function initTravelPanel() {
       const center = bounds?.getCenter?.();
 
       if (!cached) {
+        if (isStale()) return;
         const photonResults = await fetchPhotonPlaces(term, bounds);
         photonResults.forEach(result => {
           if (!result || isSearchResultHidden(result.hiddenKey)) return;
@@ -2631,6 +2690,7 @@ export async function initTravelPanel() {
         let boundsForCategorySearch = bounds;
         if (!placeSummaries.length && viewboxParams && bounds?.pad) {
           setSearchStatus('No results within the current view; expanding area…', true);
+          if (isStale()) return;
           const expandedBounds = bounds.pad(2);
           const expandedViewbox = buildViewboxParams(expandedBounds);
           if (expandedViewbox) {
@@ -2640,12 +2700,14 @@ export async function initTravelPanel() {
             boundsForCategorySearch = expandedBounds;
           }
         } else {
+          if (isStale()) return;
           placeSummaries = placeSummaries.concat(await queryNominatimForTerm(term, viewboxParams));
         }
 
         const overpassConfig = getOverpassCategoryConfig(normalizedTerm);
         if (overpassConfig && boundsForCategorySearch) {
           try {
+            if (isStale()) return;
             const overpassResults = await fetchOverpassPlaces(overpassConfig, boundsForCategorySearch);
             overpassResults.forEach(extra => {
               if (!extra || isSearchResultHidden(extra.hiddenKey)) return;
@@ -2666,6 +2728,7 @@ export async function initTravelPanel() {
       let filteredSummaries = dedupeResults(placeSummaries).filter(matchesSummary);
       if (!filteredSummaries.length && !existingMatches.length) {
         setSearchStatus(`No nearby results for "${term}"; searching worldwide…`, true);
+        if (isStale()) return;
         const globalResults = await queryNominatimForTerm(term);
         filteredSummaries = dedupeResults(globalResults).filter(matchesSummary);
         if (filteredSummaries.length) {
@@ -2706,9 +2769,12 @@ export async function initTravelPanel() {
         }))
         .sort((a, b) => b.score - a.score);
 
+      if (isStale()) return;
+
       if (filteredSummaries.length) {
         appendSectionHeader(existingMatches.length ? 'Other results' : 'Search results');
-        filteredSummaries.forEach(placeSummary => {
+        for (const placeSummary of filteredSummaries) {
+          if (isStale()) return;
           const latitude = placeSummary.lat;
           const longitude = placeSummary.lon;
           if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
@@ -2769,6 +2835,7 @@ export async function initTravelPanel() {
           );
           resultsList?.append(card);
           const showDetails = () => {
+            if (isStale()) return;
             renderSearchResultDetails(
               {
                 title: placeSummary.title,
@@ -2786,13 +2853,17 @@ export async function initTravelPanel() {
             map.setView([latitude, longitude], 14);
             showDetails();
           });
-        });
+        }
+        if (isStale()) return;
+        appendSavedMatches();
       } else if (!existingMatches.length) {
         const li = document.createElement('li');
         li.className = 'search-results__empty';
         li.textContent = `No results for "${term}".`;
         resultsList?.append(li);
       }
+      if (isStale()) return;
+      appendSavedMatches();
     } catch (err) {
       console.error('Error searching place', err);
       const li = document.createElement('li');
@@ -2800,10 +2871,12 @@ export async function initTravelPanel() {
       li.textContent = 'Search failed. Please try again.';
       resultsList?.append(li);
     } finally {
-      setSearchStatus('', false);
+      if (!isStale()) {
+        setSearchStatus('', false);
+      }
     }
+    if (isStale()) return;
     applyResultFocus();
-
     updateMobilePlacemarkListState();
   };
 
@@ -2815,12 +2888,6 @@ export async function initTravelPanel() {
   searchPlaceBtn?.addEventListener('click', e => {
     e.preventDefault();
     searchForPlace();
-  });
-
-  const debouncedTypeaheadSearch = debounce(() => searchForPlace(), 350);
-  placeInput?.addEventListener('input', () => {
-    if (placeInput.value.trim().length < 2) return;
-    debouncedTypeaheadSearch();
   });
 
   sortByProximityBtn?.addEventListener('click', () => {
